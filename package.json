@@ -1,0 +1,35 @@
+{
+  "name": "ditto-wars",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "dependencies": {
+    "@shopify/react-native-skia": "2.6.2",
+    "expo": "~57.0.20",
+    "expo-audio": "~57.0.4",
+    "expo-haptics": "~57.0.2",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-gesture-handler": "~2.32.0",
+    "react-native-reanimated": "4.5.1",
+    "react-native-web": "^0.21.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.0",
+    "@types/react": "~19.2.2",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "sfx": "node tools/gen-sfx.mjs",
+    "sim": "tsc -p tools/tsconfig.sim.json && node .sim/tools/sim.js",
+    "typecheck": "tsc --noEmit",
+    "preweb": "node tools/setup-web.mjs",
+    "setup:web": "node tools/setup-web.mjs"
+  },
+  "private": true
+}

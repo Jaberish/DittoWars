@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "Ditto Wars",
+    "slug": "ditto-wars",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#05070F",
+    "splash": {
+      "backgroundColor": "#05070F",
+      "resizeMode": "contain",
+      "image": "./assets/splash-icon.png"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.dittowars.app"
+    },
+    "android": {
+      "package": "com.dittowars.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#05070F",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "androidStatusBar": { "translucent": true, "barStyle": "light-content" },
+    "plugins": ["expo-audio"]
+  }
+}
