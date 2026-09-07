@@ -2,6 +2,7 @@ import { BOONS, BOSS_EVERY, REC_DT, ROUND_TIME } from "./engine/constants";
 import { mkRng } from "./engine/rng";
 import type { Ghost } from "./engine/types";
 import { Game } from "./engine/world";
+import { setRuns } from "./orientation";
 import type { Stick } from "./ui/Controls";
 
 /**
@@ -39,6 +40,12 @@ export function install(game: Game, stick: Stick, onJump: () => void) {
     /** Live stick, for checking that touch input actually reaches the sim. */
     stick: () => ({ x: stick.x.value, y: stick.y.value, on: stick.on.value }),
     input: () => game["input"](),
+    /** `flip(true)` then `jump(n)` to see a level the way an even run plays it. */
+    flip(on: boolean) {
+      game.flipped = on;
+      setRuns(on ? 1 : 0);
+      return `next board is ${on ? "turned" : "upright"}`;
+    },
     jump(level: number) {
       game.newRun();
       const build: Record<string, number> = {};
@@ -52,7 +59,8 @@ export function install(game: Game, stick: Stick, onJump: () => void) {
       game.run.round = level;
       game.startRound();
       onJump();
-      return `level ${level} · ${game.run.ghosts.length} dittos · ` +
+      return `level ${level} · ${game.flipped ? "turned" : "upright"} · ` +
+        `${game.run.ghosts.length} dittos · ` +
         `${game.R!.units.length - 1} fielded · ` +
         `${game.R!.waves.length} waves · ` +
         `${game.isBoss() ? "deathmatch" : "timed"} · ` +

@@ -213,7 +213,8 @@ export function MenuScreen({ onStart }: { onStart: () => void }) {
         <Text style={styles.note}>
           Drag anywhere to move. Stand in a <Text style={styles.strong}>bloom</Text> for
           faster fire or a triple shot — they land in the same places every level, and
-          your dittos pick them up too.
+          your dittos pick them up too. After the first deathmatch something starts
+          shelling them, so you have to keep moving to hold one.
         </Text>
       </Rise>
       <Act label="Start run" onPress={onStart} index={4} />

@@ -15,14 +15,13 @@ let peakField = 0, totalFrames = 0;
 function pumpRound() {
   const R = g.R!;
   let guard = 0;
-  // walk a lazy circle so the recording is a real path, and pop/doze on cooldown
+  // walk a lazy circle so the recording is a real path, and pop on cooldown
   while (g.phase === "intro" || g.phase === "playing") {
     if (guard++ > 60 * 400) throw new Error("round never ended at level " + g.run.round);
     const t = R.t;
     dir = [Math.cos(t * 0.7), Math.sin(t * 0.9)];
     if (g.phase === "playing") {
       if (R.player.novaCd <= 0 && R.enemies.length > 3) g.doPop();
-      if (R.player.dozeCd <= 0 && R.enemies.length > 6) g.doDoze();
       if (R.player.dashCd <= 0 && Math.random() < 0.02) g.doDash();
     }
     g.step(STEP);

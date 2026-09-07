@@ -3,9 +3,10 @@ import { Platform, View, useWindowDimensions } from "react-native";
 import { Canvas, Picture, createPicture, type SkPicture } from "@shopify/react-native-skia";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
-import { DOZE_CD, DASH_CD, INTRO_HOLD, INTRO_LIFT, type Boon } from "./engine/constants";
+import { DASH_CD, INTRO_HOLD, INTRO_LIFT, type Boon } from "./engine/constants";
 import { audio } from "./engine/audio";
 import { install as installDevtools } from "./devtools";
+import { countRun, loadRuns, nextIsFlipped } from "./orientation";
 import { Game } from "./engine/world";
 import type { Phase } from "./engine/types";
 import { Renderer, layoutFor } from "./render/draw";
@@ -37,7 +38,6 @@ export function GameScreen() {
     pips: useSharedValue(0),
     cdDash: useSharedValue(0),
     cdPop: useSharedValue(0),
-    cdDoze: useSharedValue(0),
   };
   const stick: Stick = {
     x: useSharedValue(0), y: useSharedValue(0),
@@ -95,7 +95,6 @@ export function GameScreen() {
       if (k === " " || k.startsWith("arrow")) e.preventDefault();
       if (k === " ") game.doDash();
       if (k === "e") game.doPop();
-      if (k === "f") game.doDoze();
     };
     const up = (e: KeyboardEvent) => { keys[e.key.toLowerCase()] = false; };
     window.addEventListener("keydown", down);
@@ -138,6 +137,7 @@ export function GameScreen() {
 
   useEffect(() => {
     audio.init();
+    loadRuns();
     return () => audio.dispose();
   }, []);
 
@@ -175,7 +175,6 @@ export function GameScreen() {
       hud.progress.value = game.progress();
       hud.cdDash.value = p.dashCd / DASH_CD;
       hud.cdPop.value = p.novaCd / p.st.novaCd;
-      hud.cdDoze.value = p.dozeCd / DOZE_CD;
       let mask = 0;
       for (let i = 1; i < R.units.length && i <= 32; i++)
         if (R.units[i].alive) mask |= 1 << (i - 1);
@@ -218,6 +217,14 @@ export function GameScreen() {
     setPipHues(game.R!.units.slice(1).map((u) => u.hue));
     setIntro((n) => n + 1);
   }, [game, stick]);
+
+  /** Pressing Start is what begins a run, and what decides which way up it plays. */
+  const beginRun = useCallback(() => {
+    game.newRun();
+    game.flipped = nextIsFlipped();
+    countRun();
+    start();
+  }, [game, start]);
 
   const newRun = useCallback(() => {
     audio.play("ui");
@@ -271,15 +278,13 @@ export function GameScreen() {
           <AbilityPad
             cdDash={hud.cdDash}
             cdPop={hud.cdPop}
-            cdDoze={hud.cdDoze}
             onDash={() => game.doDash()}
             onPop={() => game.doPop()}
-            onDoze={() => game.doDoze()}
           />
         </>
       )}
 
-      {phase === "menu" && <MenuScreen onStart={start} />}
+      {phase === "menu" && <MenuScreen onStart={beginRun} />}
 
       {phase === "boons" && (
         <BoonScreen

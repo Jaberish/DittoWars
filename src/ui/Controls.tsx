@@ -103,17 +103,14 @@ function Ability({ label, glyph, tint, cd, onPress }: BtnProps) {
 interface PadProps {
   cdDash: SharedValue<number>;
   cdPop: SharedValue<number>;
-  cdDoze: SharedValue<number>;
   onDash: () => void;
   onPop: () => void;
-  onDoze: () => void;
 }
 
-export function AbilityPad({ cdDash, cdPop, cdDoze, onDash, onPop, onDoze }: PadProps) {
+export function AbilityPad({ cdDash, cdPop, onDash, onPop }: PadProps) {
   const inset = useSafeArea();
   return (
     <View style={[styles.pad, { bottom: inset.bottom + 32 }]}>
-      <Ability label="Doze" glyph="▮▶" tint={T.rose} cd={cdDoze} onPress={onDoze} />
       <Ability label="Pop" glyph="◎" tint={T.gold} cd={cdPop} onPress={onPop} />
       <Ability label="Dash" glyph="≫" tint={T.film} cd={cdDash} onPress={onDash} />
     </View>

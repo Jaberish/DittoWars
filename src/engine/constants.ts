@@ -7,8 +7,16 @@
  */
 
 export const ARENA_BASE = 900;
-export const ARENA_STEP = 20;
+export const ARENA_STEP = 28;
 export const ARENA_CAP = 99;
+
+/**
+ * The player's radius at level 1, in arena-base units. Everything spatial is
+ * expressed at this scale and multiplied by `arenaScale(level)` on the way out, so
+ * the arena can grow without the game changing size on screen.
+ */
+export const PLAYER_R = 15;
+export const BULLET_SP = 560;
 
 export const ROUND_TIME = 30;
 export const REC_DT = 1 / 20;
@@ -24,13 +32,16 @@ export const BLOOM_R = 130;
 export const BLOOM_LIFE = 7;
 export const BLOOM_SEED = 51423;
 
-export const DOZE_TIME = 0.55;
-export const DOZE_SPEED = 720;
-export const DOZE_DMG = 14;
-export const DOZE_CD = 9;
 export const DASH_CD = 1.6;
 
 /** Deathmatch reinforcements stop here, or the board can never be cleared. */
+/**
+ * What a formation costs its wave. A set-piece puts a dozen enemies on the floor at
+ * once, so it draws several sends from the wave's budget rather than one — the wave
+ * arrives in shapes instead of a trickle without the level quietly getting bigger.
+ */
+export const FORM_COST = 5;
+
 export const DM_SPAWN_END = 75;
 
 export const BOMB_AT = 4;
@@ -39,6 +50,23 @@ export const BOMB_SEED = 90210;
 export const MINE_FUSE = 2.2;
 export const MINE_R = 110;
 export const MINE_DMG = 4;
+
+/**
+ * The siege on the bloom.
+ *
+ * From the level after the first deathmatch, shells start falling on the bloom, so
+ * the best patch of floor in the arena is never simply free. They land off-centre
+ * and cover part of the circle rather than all of it: the answer is to keep moving
+ * inside the bloom, not to abandon it. Placement is seeded per block of ten levels
+ * like everything else here, so a ditto that stepped around a shell last level steps
+ * around it again.
+ */
+export const SIEGE_FROM = BOSS_EVERY + 1;
+export const SIEGE_CD = 3.2;
+export const SIEGE_FUSE = 2.4;
+export const SIEGE_OFFSET = 0.44;
+export const SIEGE_R = 0.62;
+export const SIEGE_SEED = 60931;
 
 /** The level card holds, then lifts as the round begins. */
 export const INTRO_HOLD = 1.15;

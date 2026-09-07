@@ -12,7 +12,6 @@ export interface HudValues {
   pips: SharedValue<number>;
   cdDash: SharedValue<number>;
   cdPop: SharedValue<number>;
-  cdDoze: SharedValue<number>;
 }
 
 interface Props {

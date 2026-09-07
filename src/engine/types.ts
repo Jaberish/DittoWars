@@ -9,13 +9,16 @@ export interface Stats {
   cool: number;
   range: number;
   speed: number;
+  bulletSp: number;
   pierce: number;
   hpBonus: number;
   novaCd: number;
   novaR: number;
+  /** How much bigger this unit's world was than the level-one arena. */
+  scale: number;
 }
 
-export type RecEvent = { t: number; k: "pop" | "doze" };
+export type RecEvent = { t: number; k: "pop" };
 
 /** A recorded run: positions at 20 Hz, plus the ability beats between them. */
 export interface Ghost {
@@ -49,9 +52,6 @@ export interface Unit {
   dashT: number;
   dashCd: number;
   novaCd: number;
-  dozeT: number;
-  dozeCd: number;
-  dozeD: [number, number];
   lastDir: [number, number];
   evi: number;
   cyc: number;
@@ -96,6 +96,8 @@ export interface Enemy {
   jdir: number;
   jv?: [number, number];
   wob: number;
+  /** the arena scale of the wave this belongs to; every distance it uses is in it */
+  sc: number;
   /** render-only: spawn pop-in */
   born: number;
 }
@@ -167,6 +169,9 @@ export interface Amb {
 export interface Bloom {
   x: number;
   y: number;
+  /** where it sits before the board is turned; the shelling pattern is keyed to it */
+  cx: number;
+  cy: number;
   r: number;
   t: number;
   life: number;
@@ -180,7 +185,10 @@ export interface Wave {
   n: number;
   sent: number;
   form: "ring" | "line" | "pincer" | null;
-  formAt: number;
+  /** the sends at which the trickle gives way to a formation */
+  formAt: number[];
+  /** how many of those have already landed */
+  formIdx: number;
   gap: number;
   acc: number;
 }
@@ -217,6 +225,9 @@ export interface RoundState {
   bloom: Bloom | null;
   bloomRng: () => number;
   bloomAcc: number;
+  siegeNext: number;
+  /** which shell of the current bloom's bombardment comes next */
+  siegeShot: number;
   bombNext: number;
   typeSet: string[];
   W: number;
@@ -226,6 +237,6 @@ export interface RoundState {
 }
 
 export type SfxName =
-  | "shoot" | "pop" | "hurt" | "dash" | "doze" | "crush" | "nova"
+  | "shoot" | "pop" | "hurt" | "dash" | "nova"
   | "bloom" | "bloom3" | "mine" | "boom" | "ui" | "round" | "form"
   | "win" | "lose";

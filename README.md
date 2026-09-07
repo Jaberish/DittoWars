@@ -26,6 +26,7 @@ without a build: Skia falls back to CanvasKit, whose `.wasm` is served from
 | `npm run ios` / `android` / `web` | start the app |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run sim <levels>` | play N levels headlessly and print the balance table |
+| `npm run mirror <levels>` | prove an upside-down run is the same run, exactly |
 | `npm run sfx` | re-bake `assets/sfx` from the synthesis recipes |
 
 ## How it is put together
@@ -58,9 +59,31 @@ world it plays into is not the world it was recorded in.
 
 **Seeded waves.** A wave is fully determined by its level number, so a replayed wave
 brings back the same creatures in the same order it brought the first time. Blooms
-are fixed for a block of ten levels, and there is exactly one bomber run in the whole
-game, generated from one seed and flown identically from level 4 onward. The déjà vu
-is structural, not decorative.
+are fixed for a block of ten levels, the shells that fall on them are keyed to the
+bloom's own position, and there is exactly one bomber run in the whole game,
+generated from one seed and flown identically from level 4 onward. The déjà vu is
+structural, not decorative.
+
+**Alternate runs are played upside down.** Seeded boards keep the difficulty steady
+between playthroughs, and also make the second playthrough look like the first. So
+every other run turns the whole board through 180° about its centre — enemies,
+formations, blooms, the shells that fall on them, the bomber's run. Nothing that can
+be measured changes: `npm run mirror` plays one run upright and one turned with
+mirrored input and compares them second by second, down to individual enemy
+coordinates. The count of runs lives on the device, so the alternation survives
+closing the app.
+
+Anything laid out along an axis rather than derived from a position — a sideways
+drift, a line of splinters, a ring of shots — needs the half turn applied explicitly;
+a direction computed between two mirrored points already has it. That distinction is
+what the mirror check exists to police.
+
+**One scale for the whole world.** The arena grows every round, and everything in the
+current round is multiplied by `arenaScale(level)` — you, the wave arriving now, the
+shots, the blast radii — so the game keeps the same size on screen however far the
+floor has grown. A ditto is built from *its own* level instead, which freezes it at
+the size it was: your older selves look a little smaller every round, and old waves
+are frozen the same way for the same reason.
 
 **Traits, not subclasses.** Forty-one enemy types are rows of data with trait fields
 (`charge`, `splits`, `pull`, `phase`, `shield`, …). One behaviour pass reads them,

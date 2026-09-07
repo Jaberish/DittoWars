@@ -271,25 +271,26 @@ export class Renderer {
 
     // Two dashed rings turning against each other: it reads as a live field, and
     // the counter-rotation makes the boundary unmistakable at a glance.
-    const a1 = p.s(col(tint, (inside ? 0.95 : 0.5) * fade), inside ? 2.8 : 1.5);
+    const a1 = p.s(col(tint, (inside ? 0.95 : 0.5) * fade), (inside ? 2.8 : 1.5) * bl.r / 130);
     a1.setPathEffect(p.dashOf(tri ? 4 : 10, tri ? 7 : 8, -R.t * 26));
     canvas.drawCircle(bl.x, bl.y, bl.r, a1);
-    const a2 = p.s(col(tint, (inside ? 0.5 : 0.24) * fade), 1.2);
+    const a2 = p.s(col(tint, (inside ? 0.5 : 0.24) * fade), 1.2 * bl.r / 130);
     a2.setPathEffect(p.dashOf(3, 12, R.t * 18));
     canvas.drawCircle(bl.x, bl.y, bl.r * (0.9 + pulse * 0.05), a2);
 
     // The pip at the centre says which bloom it is without a word of type.
-    const cr = 13 + pulse * 2;
-    canvas.drawCircle(bl.x, bl.y, cr * 2.1, p.g(col(tint, 0.16 * fade), 10));
+    const u = bl.r / 130;                       // the bloom's own unit of measure
+    const cr = (13 + pulse * 2) * u;
+    canvas.drawCircle(bl.x, bl.y, cr * 2.1, p.g(col(tint, 0.16 * fade), 10 * u));
     if (tri) {
       for (let q = 0; q < 3; q++) {
         const a = -Math.PI / 2 + (q * TAU) / 3 + R.t * 0.8;
-        canvas.drawCircle(bl.x + Math.cos(a) * cr, bl.y + Math.sin(a) * cr, 4.2,
+        canvas.drawCircle(bl.x + Math.cos(a) * cr, bl.y + Math.sin(a) * cr, 4.2 * u,
           p.f(col(tint, 0.9 * fade)));
       }
     } else {
-      canvas.drawCircle(bl.x, bl.y, cr * 0.62, p.s(col(tint, 0.9 * fade), 3));
-      canvas.drawCircle(bl.x, bl.y, 3.2, p.f(col(tint, 0.95 * fade)));
+      canvas.drawCircle(bl.x, bl.y, cr * 0.62, p.s(col(tint, 0.9 * fade), 3 * u));
+      canvas.drawCircle(bl.x, bl.y, 3.2 * u, p.f(col(tint, 0.95 * fade)));
     }
   }
 
@@ -301,12 +302,13 @@ export class Renderer {
       // The ring is the blast radius and the fill is the fuse, so the fill touches
       // the ring exactly when it goes off.
       canvas.drawCircle(mn.x, mn.y, mn.r * k, p.f(hsl(h, 95, 55, 0.1 + k * 0.18)));
-      const ring = p.s(hsl(h, 95, 64, 0.24 + k * 0.36), 1.5);
+      const ring = p.s(hsl(h, 95, 64, 0.24 + k * 0.36), mn.r * 0.014);
       ring.setPathEffect(p.dashOf(5, 6, -R.t * 30));
       canvas.drawCircle(mn.x, mn.y, mn.r, ring);
       const mp = 0.5 + 0.5 * Math.sin(R.t * (7 + k * 30));
-      canvas.drawCircle(mn.x, mn.y, 13 + mp * 8, p.g(hsl(h, 100, 60, 0.4 + mp * 0.3), 7));
-      canvas.drawCircle(mn.x, mn.y, 5 + mp * 3.5, p.f(hsl(h, 100, 58 + mp * 26, 0.7 + mp * 0.3)));
+      const core = mn.r * 0.045;
+      canvas.drawCircle(mn.x, mn.y, core * (2.6 + mp * 1.6), p.g(hsl(h, 100, 60, 0.4 + mp * 0.3), core));
+      canvas.drawCircle(mn.x, mn.y, core * (1 + mp * 0.7), p.f(hsl(h, 100, 58 + mp * 26, 0.7 + mp * 0.3)));
     }
   }
 
@@ -364,7 +366,7 @@ export class Renderer {
 
       // A juke reads as speed lines trailing the direction it slipped.
       if (e.jT > 0 && e.jv) {
-        const q = p.s(hsl(T.hue, 95, 82, al * 0.55), 2.2);
+        const q = p.s(hsl(T.hue, 95, 82, al * 0.55), 2.2 * e.sc);
         for (let jq = -1; jq <= 1; jq += 2) {
           const jox = -e.jv[1] * jq * e.r * 0.5, joy = e.jv[0] * jq * e.r * 0.5;
           canvas.drawLine(
@@ -382,43 +384,49 @@ export class Renderer {
 
       // A soft contact shadow lifts every body off the floor.
       canvas.drawCircle(e.x + r * 0.1, e.y + r * 0.22, r * 0.92, p.g(col("#000B1E", 0.3), r * 0.4));
-      this.enemyBody(canvas, e, r, hue, sat, li, alpha, T.shape);
-      this.enemyMarks(canvas, e, T, alpha, R.t);
+      this.enemyBody(canvas, e, r, hue, sat, li, alpha, T.shape, e.sc);
+      this.enemyMarks(canvas, e, T, alpha, R.t, e.sc);
       if (T.boss) this.bossBar(canvas, e, frac);
     }
   }
 
   private enemyBody(
     canvas: SkCanvas, e: Enemy, r: number,
-    h: number, sa: number, li: number, al: number, shape: string,
+    h: number, sa: number, li: number, al: number, shape: string, sc: number,
   ) {
     const p = this.p;
     const path = this.shapePath(e, r, shape);
     canvas.drawPath(path, p.f(hsl(h, sa, li, al)));
-    canvas.drawPath(path, p.s(hsl(h, Math.min(100, sa + 20), Math.min(93, li + 26), al * 0.95), 1.8));
+    canvas.drawPath(path,
+      p.s(hsl(h, Math.min(100, sa + 20), Math.min(93, li + 26), al * 0.95), 1.8 * sc));
     // A single specular highlight, upper-left, is what makes it read as a bubble.
     canvas.drawCircle(e.x - r * 0.32, e.y - r * 0.33, r * 0.19, p.f(col("#FFFFFF", al * 0.45)));
     canvas.drawCircle(e.x + r * 0.18, e.y + r * 0.38, r * 0.09, p.f(col("#FFFFFF", al * 0.18)));
   }
 
   private bossBar(canvas: SkCanvas, e: Enemy, frac: number) {
-    const p = this.p;
-    const bw = e.r * 1.8, bh = 8, by = e.y - e.r - 22;
-    const back = Skia.RRectXY(Skia.XYWHRect(e.x - bw / 2, by, bw, bh), 4, 4);
+    const p = this.p, sc = e.sc;
+    const bw = e.r * 1.8, bh = 8 * sc, by = e.y - e.r - 22 * sc, in2 = 1.2 * sc;
+    const back = Skia.RRectXY(Skia.XYWHRect(e.x - bw / 2, by, bw, bh), 4 * sc, 4 * sc);
     canvas.drawRRect(back, p.f(col(C.ink, 0.92)));
     if (frac > 0)
       canvas.drawRRect(
-        Skia.RRectXY(Skia.XYWHRect(e.x - bw / 2 + 1.2, by + 1.2, (bw - 2.4) * frac, bh - 2.4), 3, 3),
+        Skia.RRectXY(
+          Skia.XYWHRect(e.x - bw / 2 + in2, by + in2, (bw - in2 * 2) * frac, bh - in2 * 2),
+          3 * sc, 3 * sc,
+        ),
         p.f(col(frac > 0.35 ? C.ember : C.gold)),
       );
-    canvas.drawRRect(back, p.s(col("#4A5680"), 1));
+    canvas.drawRRect(back, p.s(col("#4A5680"), 1 * sc));
   }
 
   /**
    * Marks come from traits, not from type names, so every row in the roster is
    * legible the moment it is added.
    */
-  private enemyMarks(canvas: SkCanvas, e: Enemy, T: EType, al: number, t: number) {
+  private enemyMarks(
+    canvas: SkCanvas, e: Enemy, T: EType, al: number, t: number, sc: number,
+  ) {
     const p = this.p, h = T.hue;
 
     if (T.charge) {
@@ -427,40 +435,40 @@ export class Renderer {
         const la = e.dashT > 0 ? Math.atan2(e.dd[1], e.dd[0]) : e.aim || 0;
         const reach = e.r * (1.4 + wu * 1.6);
         canvas.drawLine(e.x, e.y, e.x + Math.cos(la) * reach, e.y + Math.sin(la) * reach,
-          p.s(hsl(h, 100, 78, al * (0.35 + wu * 0.6)), 3));
+          p.s(hsl(h, 100, 78, al * (0.35 + wu * 0.6)), 3 * sc));
       }
     }
     if (T.explode) {
       const pu = 0.5 + 0.5 * Math.sin(t * 7 + e.wob);
       canvas.drawCircle(e.x, e.y, e.r * (0.4 + pu * 0.18),
-        p.s(col("#FFC2D8", al * (0.3 + pu * 0.45)), 2));
+        p.s(col("#FFC2D8", al * (0.3 + pu * 0.45)), 2 * sc));
     }
-    if (T.orbitR && this.near(e, T.orbitR * 0.8)) {
-      const q = p.s(hsl(h, 90, 80, al * 0.5), 1.4);
+    if (T.orbitR && this.near(e, T.orbitR * e.sc * 0.8)) {
+      const q = p.s(hsl(h, 90, 80, al * 0.5), 1.4 * sc);
       q.setPathEffect(p.dashOf(3, 5, -t * 22));
-      canvas.drawCircle(e.x, e.y, e.r + 6, q);
+      canvas.drawCircle(e.x, e.y, e.r + 6 * sc, q);
     }
     if (T.pull) {
       for (let q = 0; q < 3; q++) {
         const va = t * 2.4 + q * 2.094;
         this.arc(canvas, e.x, e.y, e.r * (0.52 + q * 0.24), va, 1.6,
-          p.s(hsl(h, 95, 80, al * 0.6), 2.2));
+          p.s(hsl(h, 95, 80, al * 0.6), 2.2 * sc));
       }
-      if (this.near(e, T.pull.r)) {
-        const q = p.s(hsl(h, 95, 80, al * 0.18), 1);
+      if (this.near(e, T.pull.r * e.sc)) {
+        const q = p.s(hsl(h, 95, 80, al * 0.18), 1 * sc);
         q.setPathEffect(p.dashOf(4, 10, t * 18));
-        canvas.drawCircle(e.x, e.y, T.pull.r, q);
+        canvas.drawCircle(e.x, e.y, T.pull.r * e.sc, q);
       }
     }
-    if (T.slow && this.near(e, T.slow.r)) {
-      const q = p.s(hsl(h, 90, 72, al * 0.22), 1.5);
+    if (T.slow && this.near(e, T.slow.r * e.sc)) {
+      const q = p.s(hsl(h, 90, 72, al * 0.22), 1.5 * sc);
       q.setPathEffect(p.dashOf(8, 12, -t * 14));
-      canvas.drawCircle(e.x, e.y, T.slow.r, q);
+      canvas.drawCircle(e.x, e.y, T.slow.r * e.sc, q);
     }
     if (T.shoot) {
       const chg = Math.max(0, 1 - e.cool / 0.6);
       if (T.shoot.ring) {
-        const q = p.s(col("#D8C2FF", al * (0.4 + chg * 0.5)), 2);
+        const q = p.s(col("#D8C2FF", al * (0.4 + chg * 0.5)), 2 * sc);
         for (let i = 0; i < T.shoot.n; i++) {
           const ra = (i * TAU) / T.shoot.n + e.age * 0.5;
           canvas.drawLine(
@@ -480,9 +488,9 @@ export class Renderer {
       }
     }
     if (T.shield)
-      canvas.drawCircle(e.x, e.y, Math.max(3, e.r - 5), p.s(hsl(h, 70, 85, al * 0.75), 2.4));
+      canvas.drawCircle(e.x, e.y, Math.max(3, e.r - 5), p.s(hsl(h, 70, 85, al * 0.75), 2.4 * sc));
     if (T.jump) {
-      const q = p.s(hsl(h, 95, 84, al * 0.42), 1.6);
+      const q = p.s(hsl(h, 95, 84, al * 0.42), 1.6 * sc);
       for (let i = -1; i <= 1; i += 2) {
         const path = p.path2;
         path.reset();
@@ -494,32 +502,32 @@ export class Renderer {
     }
     if (T.splits)
       canvas.drawLine(e.x, e.y - e.r * 0.7, e.x, e.y + e.r * 0.7,
-        p.s(col("#E6C6FF", al * 0.55), 1.8));
+        p.s(col("#E6C6FF", al * 0.55), 1.8 * sc));
     if (T.spawns || T.boss) {
-      const q = p.s(hsl(h, 90, 78, al * 0.5), 2);
+      const q = p.s(hsl(h, 90, 78, al * 0.5), 2 * sc);
       for (let i = 1; i <= 3; i++)
-        canvas.drawCircle(e.x, e.y, e.r * (0.24 * i) + Math.sin(t * 2 + i) * 2, q);
+        canvas.drawCircle(e.x, e.y, e.r * (0.24 * i) + Math.sin(t * 2 + i) * 2 * sc, q);
     }
     if (T.lays) {
-      const q = p.s(col("#FFC98A", al * 0.7), 1.6);
+      const q = p.s(col("#FFC98A", al * 0.7), 1.6 * sc);
       canvas.drawLine(e.x - e.r * 0.8, e.y, e.x + e.r * 0.8, e.y, q);
       canvas.drawLine(e.x, e.y - e.r * 0.8, e.x, e.y + e.r * 0.8, q);
     }
     if (T.regen)
-      canvas.drawCircle(e.x, e.y, e.r + 5,
-        p.s(col("#FFD6E4", al * (0.3 + 0.4 * (0.5 + 0.5 * Math.sin(t * 4 + e.wob)))), 2));
+      canvas.drawCircle(e.x, e.y, e.r + 5 * sc,
+        p.s(col("#FFD6E4", al * (0.3 + 0.4 * (0.5 + 0.5 * Math.sin(t * 4 + e.wob)))), 2 * sc));
     if (T.blink) {
-      const q = p.s(hsl(h, 95, 84, al * 0.45), 1.4);
+      const q = p.s(hsl(h, 95, 84, al * 0.45), 1.4 * sc);
       q.setPathEffect(p.dashOf(2, 4, 0));
-      canvas.drawCircle(e.x, e.y, e.r + 7, q);
+      canvas.drawCircle(e.x, e.y, e.r + 7 * sc, q);
     }
     if (T.flyer) {
       canvas.drawLine(
         e.x - e.dd[0] * e.r * 2.6, e.y - e.dd[1] * e.r * 2.6,
         e.x - e.dd[0] * e.r * 0.9, e.y - e.dd[1] * e.r * 0.9,
-        p.s(col("#FFD3D8", al * 0.34), 2.4),
+        p.s(col("#FFD3D8", al * 0.34), 2.4 * sc),
       );
-      canvas.drawCircle(e.x, e.y, e.r * 0.46, p.s(col("#FFE9EC", al * 0.8), 1.6));
+      canvas.drawCircle(e.x, e.y, e.r * 0.46, p.s(col("#FFE9EC", al * 0.8), 1.6 * sc));
     }
   }
 
@@ -654,7 +662,7 @@ export class Renderer {
     p.fill.setBlendMode(BlendMode.SrcOver);
     canvas.drawCircle(x, y, r, p.fill);
     p.fill.setShader(null);
-    canvas.drawCircle(x, y, r, p.s(hsl(hue, 95, 84, alpha * 0.92), 1.7));
+    canvas.drawCircle(x, y, r, p.s(hsl(hue, 95, 84, alpha * 0.92), r * 0.115));
     canvas.drawCircle(x - r * 0.33, y - r * 0.34, r * 0.22, p.f(col("#FFFFFF", alpha * 0.55)));
     // the film's second reflection, low and to the right
     this.arc(canvas, x, y, r * 0.74, 0.5, 1.5, p.s(col("#FFFFFF", alpha * 0.22), r * 0.13));
@@ -663,8 +671,9 @@ export class Renderer {
 
   private hpArc(canvas: SkCanvas, u: Unit, alpha: number) {
     if (u.hp >= u.max) return;
-    this.arc(canvas, u.x, u.y, u.r + 5, -1.5708, TAU * Math.max(0, u.hp / u.max),
-      this.p.s(col(C.rose, 0.6 * alpha), 2.6));
+    const sc = u.st.scale;
+    this.arc(canvas, u.x, u.y, u.r + 5 * sc, -1.5708, TAU * Math.max(0, u.hp / u.max),
+      this.p.s(col(C.rose, 0.6 * alpha), 2.6 * sc));
   }
 
   private dittos(canvas: SkCanvas, game: Game, R: RoundState) {
@@ -680,22 +689,14 @@ export class Renderer {
       if (!u.alive) al *= 0.5;
       if (arr < 1)
         canvas.drawCircle(u.x, u.y, u.r * (1 + (1 - arr) * 3.4),
-          p.s(hsl(u.hue, 90, 76, (1 - arr) * 0.65), 2.4));
+          p.s(hsl(u.hue, 90, 76, (1 - arr) * 0.65), 2.4 * u.st.scale));
       if (u.alive)
         canvas.drawCircle(u.x, u.y, u.r * 1.9, p.g(hsl(u.hue, 82, 50, 0.18 * u.fade), u.r * 0.7));
-      if (u.dozeT > 0) {
-        canvas.drawCircle(u.x, u.y, u.r * 2.1, p.g(hsl(u.hue, 92, 68, 0.5 * u.fade), u.r * 0.5));
-        const q = p.g(hsl(u.hue, 92, 76, 0.4 * u.fade), 6);
-        q.setStyle(PaintStyle.Stroke);
-        q.setStrokeWidth(u.r * 0.8);
-        canvas.drawLine(u.x - u.vx * 0.05, u.y - u.vy * 0.05, u.x, u.y, q);
-        q.setStyle(PaintStyle.Fill);
-      }
       this.gun(canvas, u, al);
       const bk = u.alive && game.bloomKind(u);
       if (bk)
-        canvas.drawCircle(u.x, u.y, u.r + 9,
-          p.s(col(bk === "triple" ? "#FFE9B4" : "#9BFFF1", 0.6 * u.fade), 2));
+        canvas.drawCircle(u.x, u.y, u.r + 9 * u.st.scale,
+          p.s(col(bk === "triple" ? "#FFE9B4" : "#9BFFF1", 0.6 * u.fade), 2 * u.st.scale));
       const rr = u.r * (arr < 1 ? 0.4 + arr * 0.72 : 1);
       this.bubble(canvas, u.x, u.y, rr, u.hue, al, u.vx, u.vy);
       if (u.alive && arr >= 1) this.hpArc(canvas, u, u.fade);
@@ -707,34 +708,34 @@ export class Renderer {
     const p = this.p, u = R.player;
     if (!u.alive) return;
 
-    if (u.dozeT > 0 || u.dashT > 0) {
-      const heavy = u.dozeT > 0;
-      canvas.drawCircle(u.x, u.y, u.r * (heavy ? 2.4 : 1.8),
-        p.g(col(heavy ? "#FF9CC0" : C.film, heavy ? 0.6 : 0.34), u.r * 0.8));
-      // a hard streak behind, so a charge reads as a charge
-      const q = p.g(col(heavy ? "#FF9CC0" : C.film, 0.45), u.r * 0.5);
+    if (u.dashT > 0) {
+      canvas.drawCircle(u.x, u.y, u.r * 1.8, p.g(col(C.film, 0.34), u.r * 0.8));
+      // a hard streak behind, so a dash reads as a dash
+      const q = p.g(col(C.film, 0.45), u.r * 0.5);
       q.setStyle(PaintStyle.Stroke);
       q.setStrokeWidth(u.r * 1.2);
       canvas.drawLine(u.x - u.vx * 0.045, u.y - u.vy * 0.045, u.x, u.y, q);
       q.setStyle(PaintStyle.Fill);
     }
+    const sc = u.st.scale;
     const bk = game.bloomKind(u);
     if (bk)
-      canvas.drawCircle(u.x, u.y, u.r + 12,
-        p.s(col(bk === "triple" ? "#FFE9B4" : "#9BFFF1", 0.55), 2));
+      canvas.drawCircle(u.x, u.y, u.r + 12 * sc,
+        p.s(col(bk === "triple" ? "#FFE9B4" : "#9BFFF1", 0.55), 2 * sc));
 
-    canvas.drawCircle(u.x, u.y, u.r + 7, p.s(col(C.chalk, 0.9), 2));
-    canvas.drawCircle(u.x, u.y, u.r + 11, p.s(col(C.film, 0.4), 1));
+    canvas.drawCircle(u.x, u.y, u.r + 7 * sc, p.s(col(C.chalk, 0.9), 2 * sc));
+    canvas.drawCircle(u.x, u.y, u.r + 11 * sc, p.s(col(C.film, 0.4), 1 * sc));
     // four ticks on the outer ring: a reticle you can find in a crowded arena
     for (let q = 0; q < 4; q++) {
       const a = (q * TAU) / 4 + R.t * 0.5;
       canvas.drawLine(
-        u.x + Math.cos(a) * (u.r + 9), u.y + Math.sin(a) * (u.r + 9),
-        u.x + Math.cos(a) * (u.r + 15), u.y + Math.sin(a) * (u.r + 15),
-        p.s(col(C.film, 0.5), 1.6),
+        u.x + Math.cos(a) * (u.r + 9 * sc), u.y + Math.sin(a) * (u.r + 9 * sc),
+        u.x + Math.cos(a) * (u.r + 15 * sc), u.y + Math.sin(a) * (u.r + 15 * sc),
+        p.s(col(C.film, 0.5), 1.6 * sc),
       );
     }
-    if (u.hitCd > 0.45) canvas.drawCircle(u.x, u.y, u.r + 14, p.g(col(C.rose, 0.5), 6));
+    if (u.hitCd > 0.45)
+      canvas.drawCircle(u.x, u.y, u.r + 14 * sc, p.g(col(C.rose, 0.5), 6 * sc));
     this.gun(canvas, u, 1);
     this.bubble(canvas, u.x, u.y, u.r, 185, 1, u.vx, u.vy);
     this.hpArc(canvas, u, 1);

@@ -1,7 +1,8 @@
 import {
   ARENA_BASE, ARENA_CAP, ARENA_STEP, BLOOM_LIFE, BLOOM_MUL, BLOOM_R, BLOOM_SEED,
   BOMB_AT, BOMB_MAX, BOMB_SEED, BOONS, BOSS_EVERY, DASH_CD, DITTO_CAP,
-  DM_SPAWN_END, DOZE_CD, DOZE_DMG, DOZE_SPEED, DOZE_TIME, GHOST_DMG, INTRO_HOLD,
+  BULLET_SP, DM_SPAWN_END, GHOST_DMG, INTRO_HOLD, PLAYER_R,
+  FORM_COST, SIEGE_CD, SIEGE_FROM, SIEGE_FUSE, SIEGE_OFFSET, SIEGE_R, SIEGE_SEED,
   INTRO_LIFT, MAX_ROUNDS, MINE_DMG, MINE_FUSE, MINE_R, REC_DT, ROUND_TIME,
 } from "./constants";
 import { ETYPES, blockTypes, bossFor, newestTypeAt } from "./enemies";
@@ -29,6 +30,21 @@ export class Game {
   R: RoundState | null = null;
   phase: Phase = "menu";
   pendingGhost: Ghost | null = null;
+  /**
+   * Play this run upside down.
+   *
+   * Every board in the game is generated from a seed, which is what keeps the skill
+   * curve identical from one playthrough to the next — and also what makes a
+   * playthrough look like the last one. Turning the whole board through 180° about
+   * its centre changes nothing that can be measured: same enemies, same order, same
+   * counts, same timings, same distances. It is the one transform that is free.
+   *
+   * Set per run, never per level: a ditto is recorded against a board and replayed
+   * against that same board next level, so the orientation has to hold for the whole
+   * run or the recordings stop lining up with what they were recorded against.
+   */
+  flipped = false;
+
   private input: InputSource = () => [0, 0];
   /**
    * Read live rather than snapshotted: a round started from a stale copy of the
@@ -43,6 +59,20 @@ export class Game {
   }
 
   setInput(fn: InputSource) { this.input = fn; }
+
+  /** A point as the seeds produced it, placed on the board this run is playing. */
+  private place(x: number, y: number): [number, number] {
+    const R = this.R!;
+    return this.flipped ? [R.W - x, R.H - y] : [x, y];
+  }
+
+  /**
+   * The sign, and the half-turn, for anything laid out along an axis rather than
+   * derived from a position. A sideways drift or a line of splinters has to turn
+   * with the board; a direction computed from two mirrored points already has.
+   */
+  private mir() { return this.flipped ? -1 : 1; }
+  private mirA() { return this.flipped ? Math.PI : 0; }
 
   setViewport(fn: () => [number, number]) { this.viewport = fn; }
 
@@ -72,29 +102,50 @@ export class Game {
     return [base / k, base * k];
   }
 
-  bloomRadius() {
-    const base = ARENA_BASE + Math.min(this.run.round - 1, ARENA_CAP) * ARENA_STEP;
-    return BLOOM_R * Math.sqrt(base / ARENA_BASE);
+  /**
+   * How much bigger the arena is at this level than at level one.
+   *
+   * The arena grows every round, and everything that lives in the current round —
+   * you, the wave arriving now, your shots, the blast radii — is multiplied by this,
+   * so the game keeps the same size on screen no matter how far the floor has grown.
+   * A ditto is built from *its own* level instead, which freezes it at the size it
+   * was, and is why your older selves look a little smaller every round. Old waves
+   * are frozen the same way, for the same reason.
+   */
+  static arenaScale(level: number) {
+    return (ARENA_BASE + Math.min(level - 1, ARENA_CAP) * ARENA_STEP) / ARENA_BASE;
   }
 
-  static radiusFor(level: number) { return 14 + Math.min(level, 99) * 0.5; }
+  /** The scale of the round being played right now. */
+  roundScale() { return Game.arenaScale(this.run.round); }
+
+  bloomRadius() { return BLOOM_R * this.roundScale(); }
+
+  static radiusFor(level: number) { return PLAYER_R * Game.arenaScale(level); }
   static ghostHue(r: number) { return 108 + ((r * 29) % 36); }
 
   static stats(level: number, b: Build = {}): Stats {
     const rapid = b.rapid || 0, punch = b.punch || 0, vigor = b.vigor || 0;
     const reach = b.reach || 0, surge = b.surge || 0;
+    // Damage, cooldowns and health are counts, not distances: they do not scale.
+    const sc = Game.arenaScale(level);
     return {
-      dmg: (1 + level * 0.24) *
+      // Doze used to be a quarter of the team's output — every ditto replayed its
+      // sweep — so the gun carries that share now. Shots-to-kill stays flat across
+      // the run at a little over two; the whole curve is built on that number.
+      dmg: (1 + level * 0.31) *
         Math.pow(0.97, rapid) * Math.pow(1.05, punch) * Math.pow(0.985, reach),
       cool: (0.38 / (1 + level * 0.03)) *
         Math.pow(0.955, rapid) * Math.pow(1.03, punch) *
         Math.pow(1.015, vigor) * Math.pow(1.02, surge),
-      range: 330 + reach * 18,
-      speed: 210,
+      range: (330 + reach * 18) * sc,
+      speed: 210 * sc,
+      bulletSp: BULLET_SP * sc,
       pierce: Math.floor(reach / 4),
       hpBonus: vigor * 1.5,
       novaCd: Math.max(2.5, 7 - surge * 0.25),
-      novaR: 170 + surge * 8,
+      novaR: (170 + surge * 8) * sc,
+      scale: sc,
     };
   }
 
@@ -114,7 +165,7 @@ export class Game {
       kind, x, y, r: Game.radiusFor(level),
       hp, max: hp, level, st: s, hue,
       fire: Math.random() * 0.25, alive: true, hitCd: 0, aim: 0, muzzle: 0,
-      dashT: 0, dashCd: 0, novaCd: 0, dozeT: 0, dozeCd: 0, dozeD: [1, 0],
+      dashT: 0, dashCd: 0, novaCd: 0,
       lastDir: [1, 0], evi: 0, cyc: -1, g: null, ofx: 0, ofy: 0, fade: 1,
       age: 0, dur: 0, vx: 0, vy: 0, born: 0,
     };
@@ -123,13 +174,13 @@ export class Game {
   /* ================= waves ================= */
 
   /**
-   * Every fifth wave arrives as a shape instead of a trickle, and a wave replays
-   * identically for the rest of the run — so the same set-piece lands on the same
-   * beat, level after level.
+   * Every third wave arrives as a shape instead of a trickle, twice over, and a
+   * wave replays identically for the rest of the run — so the same set-piece lands
+   * on the same beat, level after level.
    */
   private formationFor(k: number): Wave["form"] {
-    if (k % 5 !== 0) return null;
-    return (["ring", "line", "pincer"] as const)[Math.floor(k / 5) % 3];
+    if (k % 3 !== 0) return null;
+    return (["ring", "line", "pincer"] as const)[Math.floor(k / 3) % 3];
   }
 
   private mkWave(k: number): Wave {
@@ -140,9 +191,21 @@ export class Game {
     let n = Math.min(9 + Math.floor(lk * 1.4), 24);
     if (this.isBoss()) n = Math.max(4, Math.round(n * 0.55));
     if (this.isBoss() && this.run.round === BOSS_EVERY) n = Math.max(3, Math.round(n * 0.6));
+    const rng = mkRng(k * 9176 + 1337);
+    // Every wave in the block runs on the same clock, so without a per-wave offset
+    // their set-pieces all land on the same second and drop three rings on your head
+    // at once. Drawn from the wave's own seed, so the stagger replays too.
+    const f1 = 0.14 + rng() * 0.3, f2 = 0.52 + rng() * 0.34;
+    // A second set-piece only once a wave is long enough to carry one; early waves
+    // in a block are fought by a small squad and one shape is already plenty.
+    const beats = lk >= 7 ? [f1, f2] : [f1];
     return {
-      k, rng: mkRng(k * 9176 + 1337), n, sent: 0,
-      form: this.formationFor(k), formAt: Math.floor(n * 0.45),
+      k, rng, n, sent: 0,
+      // A wave only forms up if it can pay for it. Deathmatch waves are thinned to
+      // a handful of sends, and a set-piece there is not a shape inside the wave —
+      // it is the whole wave, arriving at once.
+      form: n >= FORM_COST * 2 ? this.formationFor(k) : null,
+      formAt: beats.map((f) => Math.floor(n * f)), formIdx: 0,
       gap: (this.isBoss() ? 46 : ROUND_TIME - 1.2) / n, acc: 0.5,
     };
   }
@@ -157,6 +220,7 @@ export class Game {
       rec: { pts: [], events: [] }, recAcc: 0,
       waves: [], popped: 0, army: 0,
       bloom: null, bloomRng: mkRng(BLOOM_SEED + this.bloomBlock() * 7919), bloomAcc: 4,
+      siegeNext: SIEGE_CD, siegeShot: 0,
       bombNext: this.run.round >= BOMB_AT ? 6 : 1e9,
       typeSet: blockTypes(this.bloomBlock()),
       W, H, intro: INTRO_HOLD + INTRO_LIFT,
@@ -188,8 +252,9 @@ export class Game {
 
     for (let a = 0; a < 18; a++)
       R.amb.push({
-        x: Math.random() * W, y: Math.random() * H, r: 4 + Math.random() * 13,
-        vy: -4 - Math.random() * 11, ph: Math.random() * 6.28,
+        x: Math.random() * W, y: Math.random() * H,
+        r: (4 + Math.random() * 13) * this.roundScale(),
+        vy: (-4 - Math.random() * 11) * this.roundScale(), ph: Math.random() * 6.28,
       });
 
     this.setPhase("intro");
@@ -226,7 +291,7 @@ export class Game {
   doDash() {
     if (this.phase !== "playing") return;
     const p = this.R!.player;
-    if (!p.alive || p.dashCd > 0 || p.dozeT > 0) return;
+    if (!p.alive || p.dashCd > 0) return;
     p.dashCd = DASH_CD; p.dashT = 0.16;
     this.hooks.sfx("dash");
     this.hooks.haptic("light");
@@ -241,32 +306,6 @@ export class Game {
     R.rec.events.push({ t: R.t, k: "pop" });
     R.hitStop = Math.max(R.hitStop, 0.07);
     this.hooks.haptic("medium");
-  }
-
-  /**
-   * Doze commits you to a line. The path is captured by the position track for
-   * free; only the "this is a charge, not a stroll" flag needs recording.
-   */
-  doDoze() {
-    if (this.phase !== "playing") return;
-    const R = this.R!, p = R.player;
-    if (!p.alive || p.dozeCd > 0) return;
-    let d = this.input();
-    if (!d[0] && !d[1]) {
-      const tgt = this.nearestEnemy(p.x, p.y, 1e9);
-      if (tgt) {
-        const a = Math.atan2(tgt.y - p.y, tgt.x - p.x);
-        d = [Math.cos(a), Math.sin(a)];
-      } else d = p.lastDir;
-    }
-    const m = Math.hypot(d[0], d[1]) || 1;
-    p.dozeD = [d[0] / m, d[1] / m];
-    p.dozeT = DOZE_TIME; p.dozeCd = DOZE_CD;
-    R.rec.events.push({ t: R.t, k: "doze" });
-    R.shake = Math.max(R.shake, 7);
-    R.hitStop = Math.max(R.hitStop, 0.06);
-    this.hooks.sfx("doze");
-    this.hooks.haptic("heavy");
   }
 
   /* ================= combat ================= */
@@ -291,7 +330,8 @@ export class Game {
       const e = R.enemies[i];
       const dx = e.x - u.x, dy = e.y - u.y, d = Math.hypot(dx, dy) || 1;
       if (d < rad) {
-        e.x += (dx / d) * 46; e.y += (dy / d) * 46;
+        const kb = 46 * u.st.scale;
+        e.x += (dx / d) * kb; e.y += (dy / d) * kb;
         this.hurtEnemy(e, dmg, i);
       }
     }
@@ -307,23 +347,23 @@ export class Game {
       const sn = Math.max(0, Math.min(T.splits.n, this.enemyCap() - R.enemies.length));
       for (let q = 0; q < sn; q++) {
         if (sn > 4) {
-          const sa2 = (q * TAU) / sn + Math.random() * 0.28;
+          const sa2 = (q * TAU) / sn + Math.random() * 0.28 + this.mirA();
           const sr = e.r * 0.8 + Math.random() * e.r * 0.9;
           this.spawnAt(e.x + Math.cos(sa2) * sr, e.y + Math.sin(sa2) * sr, T.splits.t, e.w);
         } else {
-          this.spawnAt(e.x + (q - (sn - 1) / 2) * 24, e.y, T.splits.t, e.w);
+          this.spawnAt(e.x + (q - (sn - 1) / 2) * 24 * e.sc * this.mir(), e.y, T.splits.t, e.w);
         }
       }
     }
 
     if (T.explode) {
-      R.fx.push({ x: e.x, y: e.y, t: 0, life: 0.55, rad: T.explode.r, hue: T.hue, ring: true, width: 7 });
+      R.fx.push({ x: e.x, y: e.y, t: 0, life: 0.55, rad: T.explode.r * e.sc, hue: T.hue, ring: true, width: 7 });
       R.shake = Math.max(R.shake, 9);
       R.hitStop = Math.max(R.hitStop, 0.05);
       this.hooks.sfx("boom");
       for (const uz of R.units) {
-        if (!uz.alive || uz.dozeT > 0) continue;
-        if (Math.hypot(uz.x - e.x, uz.y - e.y) < T.explode.r) {
+        if (!uz.alive) continue;
+        if (Math.hypot(uz.x - e.x, uz.y - e.y) < T.explode.r * e.sc) {
           // Full price for you, half for a ditto: you choose where you stand, and a
           // recording cannot dodge a blast that was not there when it played.
           uz.hp -= T.explode.dmg * (uz.kind === "player" ? 1 : 0.5);
@@ -362,14 +402,17 @@ export class Game {
     return pool[(rnd() * pool.length) | 0];
   }
 
-  private spawnAt(x: number, y: number, type: string, k: number, wob?: number) {
+  private spawnAt(x: number, y: number, type: string, k: number, wob?: number, scale?: number) {
     const R = this.R!, t = ETYPES[type];
     let hp = (3 + (k - 1) * 0.7) * t.hp;     // wave k is as tough as ditto k is strong
     if (t.boss && this.run.round === BOSS_EVERY) hp *= 0.7;   // first boss, first lesson
+    // Frozen at its wave's scale, exactly like a ditto: an old wave is a smaller
+    // wave, and the size difference is the same signal in both directions.
+    const sc = scale ?? Game.arenaScale(k);
     R.enemies.push({
-      x, y, hp, max: hp, type, dmg: t.dmg, w: k, flash: 0,
-      r: (t.r + Math.min(k, 99) * 0.22) * (type === "mote" ? 0.6 : 1),
-      sp: (52 + Math.min(k * 2, 46)) * t.sp,
+      x, y, hp, max: hp, type, dmg: t.dmg, w: k, flash: 0, sc,
+      r: t.r * sc * (type === "mote" ? 0.6 : 1),
+      sp: (52 + Math.min(k * 2, 46)) * t.sp * sc,
       wind: 1.2 + Math.random() * 1.6, dashT: 0, dd: [0, 0], aim: 0,
       cool: 0.6 + Math.random() * 1.6, cool2: 1 + Math.random(),
       spawnT: t.spawns ? t.spawns.cd : 2.5, age: 0,
@@ -390,7 +433,8 @@ export class Game {
   private theBombRun() {
     const R = this.R!, { W, H } = R;
     const rnd = mkRng(BOMB_SEED);
-    const side = (rnd() * 4) | 0, u = rnd(), ta = rnd(), tb = rnd(), pad = -30;
+    const side = (rnd() * 4) | 0, u = rnd(), ta = rnd(), tb = rnd();
+    const pad = -30 * this.roundScale();
     let x: number, y: number;
     if (side === 0) { x = u * W; y = pad; }
     else if (side === 1) { x = u * W; y = H - pad; }
@@ -398,13 +442,15 @@ export class Game {
     else { x = W - pad; y = u * H; }
     const tx = W - x + (ta - 0.5) * W * 0.35, ty = H - y + (tb - 0.5) * H * 0.35;
     const bx = tx - x, by = ty - y, bl = Math.hypot(bx, by) || 1;
-    return { x, y, dd: [bx / bl, by / bl] as [number, number] };
+    const [fx, fy] = this.place(x, y);
+    const f = this.flipped ? -1 : 1;
+    return { x: fx, y: fy, dd: [(f * bx) / bl, (f * by) / bl] as [number, number] };
   }
 
   private spawnEnemy(wv: Wave): boolean {
     const R = this.R!, { W, H } = R;
     if (R.enemies.length >= this.enemyCap()) return false;
-    const rnd = wv.rng, side = (rnd() * 4) | 0, pad = -18;
+    const rnd = wv.rng, side = (rnd() * 4) | 0, pad = -18 * this.roundScale();
     let x: number, y: number;
     if (side === 0) { x = rnd() * W; y = pad; }
     else if (side === 1) { x = rnd() * W; y = H - pad; }
@@ -416,39 +462,54 @@ export class Game {
       ? this.pickType(wv.k, rnd)
       : (this.isBoss() && wv.k === this.run.round && bossFor(this.run.round)) || newestTypeAt(wv.k);
     if (type === "mote") {
-      for (let m = 0; m < 3; m++)
-        this.spawnAt(x + (rnd() - 0.5) * 70, y + (rnd() - 0.5) * 70, "mote", wv.k, rnd() * 6.28);
+      // A shoal, not a trio. Six reads as a swarm from across the arena — and costs
+      // the wave two sends, so the shoal is bigger without the level being bigger.
+      const spread = 96 * Game.arenaScale(wv.k);
+      for (let m = 0; m < 6; m++) {
+        const [mx, my] = this.place(x + (rnd() - 0.5) * spread, y + (rnd() - 0.5) * spread);
+        this.spawnAt(mx, my, "mote", wv.k, rnd() * 6.28);
+      }
+      wv.sent++;
     } else {
-      this.spawnAt(x, y, type, wv.k, rnd() * 6.28);
+      const [sx, sy] = this.place(x, y);
+      this.spawnAt(sx, sy, type, wv.k, rnd() * 6.28);
     }
     return true;
   }
 
   private spawnFormation(wv: Wave) {
     const R = this.R!, { W, H } = R;
-    const rnd = wv.rng, t = this.pickType(wv.k, rnd);
+    const rnd = wv.rng, t = this.pickType(wv.k, rnd), sc = this.roundScale();
+    const pad = 26 * sc;
     if (wv.form === "ring") {
       const rad = Math.min(W, H) * 0.42;
-      for (let q = 0; q < 12; q++) {
-        const ang = q * 0.5236;
-        this.spawnAt(W / 2 + Math.cos(ang) * rad, H / 2 + Math.sin(ang) * rad, t, wv.k, ang);
+      for (let q = 0; q < 10; q++) {
+        const ang = (q * TAU) / 10;
+        const [fx, fy] = this.place(W / 2 + Math.cos(ang) * rad, H / 2 + Math.sin(ang) * rad);
+        this.spawnAt(fx, fy, t, wv.k, ang);
       }
     } else if (wv.form === "line") {
       const side = (rnd() * 4) | 0;
-      for (let q = 0; q < 10; q++) {
-        const u = (q + 0.5) / 10;
-        if (side === 0) this.spawnAt(u * W, -26, t, wv.k, 0);
-        else if (side === 1) this.spawnAt(u * W, H + 26, t, wv.k, 0);
-        else if (side === 2) this.spawnAt(-26, u * H, t, wv.k, 0);
-        else this.spawnAt(W + 26, u * H, t, wv.k, 0);
+      for (let q = 0; q < 8; q++) {
+        const u = (q + 0.5) / 8;
+        const at = (fx: number, fy: number) => {
+          const [px, py] = this.place(fx, fy);
+          this.spawnAt(px, py, t, wv.k, 0);
+        };
+        if (side === 0) at(u * W, -pad);
+        else if (side === 1) at(u * W, H + pad);
+        else if (side === 2) at(-pad, u * H);
+        else at(W + pad, u * H);
       }
     } else {
       const horiz = rnd() < 0.5;
       for (let sd = 0; sd < 2; sd++)
-        for (let q = 0; q < 6; q++) {
-          const j = (q - 2.5) * 48;
-          if (horiz) this.spawnAt(sd ? W + 26 : -26, H * 0.5 + j, t, wv.k, 0);
-          else this.spawnAt(W * 0.5 + j, sd ? H + 26 : -26, t, wv.k, 0);
+        for (let q = 0; q < 5; q++) {
+          const j = (q - 2) * 48 * sc;
+          const [px, py] = horiz
+            ? this.place(sd ? W + pad : -pad, H * 0.5 + j)
+            : this.place(W * 0.5 + j, sd ? H + pad : -pad);
+          this.spawnAt(px, py, t, wv.k, 0);
         }
     }
     R.fx.push({
@@ -519,19 +580,14 @@ export class Game {
       const px0 = p.x, py0 = p.y;
       p.dashCd = Math.max(0, p.dashCd - dt);
       p.novaCd = Math.max(0, p.novaCd - dt);
-      p.dozeCd = Math.max(0, p.dozeCd - dt);
-      if (p.dozeT > 0) {
-        p.dozeT -= dt;
-        p.x += p.dozeD[0] * DOZE_SPEED * dt;
-        p.y += p.dozeD[1] * DOZE_SPEED * dt;
-      } else {
+      {
         const d = this.input();
         if (d[0] || d[1]) p.lastDir = [d[0], d[1]];
         let slowMul = 1;
         for (const se of R.enemies) {
           const ST = ETYPES[se.type];
           if (!ST.slow) continue;
-          if (Math.hypot(p.x - se.x, p.y - se.y) < ST.slow.r)
+          if (Math.hypot(p.x - se.x, p.y - se.y) < ST.slow.r * se.sc)
             slowMul = Math.min(slowMul, ST.slow.mul);
         }
         const sp = p.st.speed * slowMul * (p.dashT > 0 ? 3.2 : 1);
@@ -554,7 +610,6 @@ export class Game {
     for (let i = 1; i < R.units.length; i++) {
       const u = R.units[i];
       if (!u.alive) { u.fade = Math.max(0, u.fade - dt * 2.2); continue; }
-      u.dozeT = Math.max(0, u.dozeT - dt);
       const g = u.g!;
       let tt: number, forward = true;
       if (this.isBoss()) {
@@ -580,7 +635,6 @@ export class Game {
         while (u.evi < g.events.length && g.events[u.evi].t <= tt) {
           const ev = g.events[u.evi];
           if (ev.k === "pop") this.nova(u, 1);
-          else if (ev.k === "doze") u.dozeT = DOZE_TIME;
           u.evi++;
         }
     }
@@ -604,7 +658,7 @@ export class Game {
         if (tgt) {
           const bk = this.bloomKind(u);
           u.fire = u.st.cool / (bk === "rapid" ? BLOOM_MUL : 1);
-          const ang = Math.atan2(tgt.y - u.y, tgt.x - u.x), bs = 560;
+          const ang = Math.atan2(tgt.y - u.y, tgt.x - u.x), bs = u.st.bulletSp;
           u.aim = ang;            // barrel and shot agree at the instant of firing
           u.muzzle = 0.07;
           const shots = bk === "triple" ? 3 : 1;
@@ -615,27 +669,13 @@ export class Game {
               x: bx, y: by, px: u.x, py: u.y,
               vx: Math.cos(sa) * bs, vy: Math.sin(sa) * bs,
               dmg: u.st.dmg * (u.kind === "ghost" ? GHOST_DMG : 1),
-              life: 1.1, r: Math.min(9, 4 + u.level * 0.35) * (u.kind === "ghost" ? 0.8 : 1),
+              life: 1.1, r: u.r * 0.3 * (u.kind === "ghost" ? 0.8 : 1),
               pierce: u.st.pierce, hit: null, hue: u.hue, ghost: u.kind === "ghost",
               tr: [bx, by, bx, by, bx, by],
             });
           }
           if (u.kind === "player") this.hooks.sfx("shoot");
         } else u.fire = 0.06;
-      }
-      /* dozing units crush what they run into */
-      if (u.dozeT > 0) {
-        for (let j = R.enemies.length - 1; j >= 0; j--) {
-          const e = R.enemies[j];
-          if (ETYPES[e.type].invuln || e.hidden) continue;
-          const rr = e.r + u.r + 4;
-          if ((e.x - u.x) * (e.x - u.x) + (e.y - u.y) * (e.y - u.y) < rr * rr) {
-            const kx = e.x - u.x, ky = e.y - u.y, km = Math.hypot(kx, ky) || 1;
-            e.x += (kx / km) * 40; e.y += (ky / km) * 40;
-            if (this.hurtEnemy(e, DOZE_DMG * (u.kind === "ghost" ? GHOST_DMG : 1), j) &&
-              u.kind === "player") this.hooks.sfx("crush");
-          }
-        }
       }
     }
 
@@ -653,12 +693,44 @@ export class Game {
         const bu = R.bloomRng(), bv = R.bloomRng(), bk2 = R.bloomRng();
         // Placed as a fraction of the arena, never an absolute inset, so the same
         // bloom sits at the same spot on the floor no matter how far it has grown.
+        const cx = W * (0.13 + bu * 0.74), cy = H * (0.13 + bv * 0.74);
+        const [bx, by] = this.place(cx, cy);
         R.bloom = {
-          x: W * (0.13 + bu * 0.74), y: H * (0.13 + bv * 0.74),
+          x: bx, y: by, cx, cy,
           r: this.bloomRadius(), t: BLOOM_LIFE, life: BLOOM_LIFE, wasIn: false,
           kind: bk2 < 0.45 ? "triple" : "rapid",
         };
+        R.siegeShot = 0;
       }
+    }
+
+    /* --- shells fall on the bloom, so the best floor in the arena is never free --- */
+    if (this.run.round >= SIEGE_FROM && R.bloom) {
+      R.siegeNext -= dt;
+      if (R.siegeNext <= 0) {
+        R.siegeNext = SIEGE_CD;
+        const b = R.bloom;
+        // Keyed on the bloom's own position and the shot's number, not on a running
+        // stream: combat noise nudges when a bloom opens, and a stream would slide
+        // out of step with it. This way the third shell on a given bloom always
+        // lands where the third shell lands, so a ditto that stepped around it once
+        // steps around it every time.
+        // Keyed to the bloom's unturned position, so the pattern of shells turns
+        // with the board instead of becoming a different pattern on a flipped run.
+        const rr = mkRng(SIEGE_SEED + Math.round(b.cx) * 7919 +
+          Math.round(b.cy) * 104729 + R.siegeShot * 31);
+        R.siegeShot++;
+        const a = rr() * TAU;
+        const d = Math.sqrt(rr()) * b.r * SIEGE_OFFSET;
+        const [mx, my] = this.place(b.cx + Math.cos(a) * d, b.cy + Math.sin(a) * d);
+        const r = b.r * SIEGE_R;
+        R.mines.push({ x: mx, y: my, t: SIEGE_FUSE, life: SIEGE_FUSE, r });
+        // an impact ring, so the shell announces itself rather than appearing
+        R.fx.push({ x: mx, y: my, t: 0, life: 0.4, rad: r, hue: 14, ring: true, width: 4 });
+        this.hooks.sfx("mine");
+      }
+    } else if (!R.bloom) {
+      R.siegeNext = SIEGE_CD * 0.55;   // a beat of grace when a new bloom opens
     }
 
     /* --- a deathmatch stops reinforcing eventually, or it can never be cleared --- */
@@ -670,8 +742,13 @@ export class Game {
       if (wv.sent >= wv.n) continue;
       wv.acc -= dt;
       if (wv.acc <= 0) {
-        if (wv.form && wv.sent === wv.formAt && R.enemies.length < this.enemyCap() - 12) {
-          this.spawnFormation(wv); wv.sent++; wv.acc += wv.gap * 2.5;
+        const due = wv.form && wv.formIdx < wv.formAt.length &&
+          wv.sent >= wv.formAt[wv.formIdx];
+        if (due && R.enemies.length < this.enemyCap() - 12) {
+          this.spawnFormation(wv);
+          wv.formIdx++;
+          wv.sent += FORM_COST;
+          wv.acc += wv.gap * FORM_COST * 0.7;
         } else {
           if (this.spawnEnemy(wv)) wv.sent++;
           wv.acc += wv.gap;
@@ -690,7 +767,9 @@ export class Game {
       for (const e of R.enemies) if (e.type === "bomb") flyingB++;
       if (flyingB < BOMB_MAX) {
         const prm = this.theBombRun();
-        this.spawnAt(prm.x, prm.y, "bomb", BOMB_AT, 0);
+        // Its run is the same one forever, but it is a hazard on today's board, not
+        // a memory of an old one — so it flies and bombs at this round's scale.
+        this.spawnAt(prm.x, prm.y, "bomb", BOMB_AT, 0, this.roundScale());
         const bm = R.enemies[R.enemies.length - 1];
         bm.dd = prm.dd;
         bm.cool = 0.3;
@@ -707,7 +786,7 @@ export class Game {
       R.shake = Math.max(R.shake, 8);
       this.hooks.sfx("boom");
       for (const uz of R.units) {
-        if (!uz.alive || uz.dozeT > 0) continue;
+        if (!uz.alive) continue;
         if (Math.hypot(uz.x - mn.x, uz.y - mn.y) < mn.r) {
           uz.hp -= MINE_DMG * (uz.kind === "player" ? 1 : 0.5);
           if (uz.kind === "player") { this.hooks.sfx("hurt"); R.hurtFlash = 1; this.hooks.haptic("heavy"); }
@@ -727,7 +806,7 @@ export class Game {
         R.ebul.splice(i, 1); continue;
       }
       for (const uu of R.units) {
-        if (!uu.alive || uu.dozeT > 0) continue;
+        if (!uu.alive) continue;
         const rr2 = uu.r + eb.r;
         if (Game.segDist2(eb.px, eb.py, eb.x, eb.y, uu.x, uu.y) < rr2 * rr2) {
           uu.hp -= eb.dmg;
@@ -781,6 +860,7 @@ export class Game {
     // Nothing is worse than chasing three stragglers around a huge floor, so once
     // the army is spent the remnant closes on you hard.
     const rushMul = this.isBoss() && R.enemies.length <= 10 && this.armySent() ? 2.6 : 1;
+    const mir = this.mir();
 
     for (let i = R.enemies.length - 1; i >= 0; i--) {
       const e = R.enemies[i], T = ETYPES[e.type];
@@ -800,7 +880,7 @@ export class Game {
         e.cool -= dt;
         if (e.cool <= 0) {
           e.cool = 0.55;
-          R.mines.push({ x: e.x, y: e.y, t: MINE_FUSE, life: MINE_FUSE, r: MINE_R });
+          R.mines.push({ x: e.x, y: e.y, t: MINE_FUSE, life: MINE_FUSE, r: MINE_R * e.sc });
           this.hooks.sfx("mine");
         }
         if (e.x < -80 || e.x > W + 80 || e.y < -80 || e.y > H + 80) R.enemies.splice(i, 1);
@@ -839,17 +919,18 @@ export class Game {
         else { e.x += tx * e.sp * dt; e.y += ty * e.sp * dt; }
       } else if (T.orbitR) {
         // circles instead of closing, hijacking your team's nearest-target aim
-        const want = Math.max(60, T.orbitR - e.age * 12);
-        const inward = Math.max(-1, Math.min(1, (m - want) / 60));
+        const want = Math.max(60 * e.sc, (T.orbitR - e.age * 12) * e.sc);
+        const inward = Math.max(-1, Math.min(1, (m - want) / (60 * e.sc)));
         e.x += (tx * inward * e.sp * 0.85 - ty * e.sp) * dt;
         e.y += (ty * inward * e.sp * 0.85 + tx * e.sp) * dt;
       } else if (T.hold) {
-        const push = Math.max(-1, Math.min(1, (m - T.hold) / 70));
+        const push = Math.max(-1, Math.min(1, (m - T.hold * e.sc) / (70 * e.sc)));
         e.x += tx * e.sp * push * dt;
         e.y += ty * e.sp * push * dt;
       } else {
         e.x += tx * e.sp * dt;
-        e.y += ty * e.sp * dt + (T.zig ? Math.sin(e.wob * 1.7) * T.zig : Math.sin(e.wob) * 8) * dt;
+        e.y += ty * e.sp * dt +
+          (T.zig ? Math.sin(e.wob * 1.7) * T.zig : Math.sin(e.wob) * 8) * e.sc * mir * dt;
       }
 
       if (rushMul > 1) {
@@ -875,10 +956,10 @@ export class Game {
 
       if (T.blink) {
         e.bk -= dt;
-        if (e.bk <= 0 && m > T.blink.d * 0.8) {
+        if (e.bk <= 0 && m > T.blink.d * e.sc * 0.8) {
           e.bk = T.blink.cd;
           R.fx.push({ x: e.x, y: e.y, t: 0, life: 0.3, rad: e.r * 1.8, hue: T.hue, ring: true, width: 3 });
-          e.x += tx * T.blink.d; e.y += ty * T.blink.d;
+          e.x += tx * T.blink.d * e.sc; e.y += ty * T.blink.d * e.sc;
           R.fx.push({ x: e.x, y: e.y, t: 0, life: 0.3, rad: e.r * 1.8, hue: T.hue, ring: true, width: 3 });
         }
       }
@@ -886,10 +967,11 @@ export class Game {
       /* the pull attacks the one thing you actually control: where you stand */
       if (T.pull) {
         const pl = R.player;
-        if (pl.alive && pl.dozeT <= 0) {
+        if (pl.alive) {
           const vx2 = e.x - pl.x, vy2 = e.y - pl.y, vm = Math.hypot(vx2, vy2) || 1;
-          if (vm < T.pull.r) {
-            const force = (1 - vm / T.pull.r) * T.pull.f;
+          const pr = T.pull.r * e.sc;
+          if (vm < pr) {
+            const force = (1 - vm / pr) * T.pull.f * e.sc;
             pl.x += (vx2 / vm) * force * dt;
             pl.y += (vy2 / vm) * force * dt;
           }
@@ -898,18 +980,18 @@ export class Game {
 
       if (T.shoot) {
         e.cool -= dt;
-        if (e.cool <= 0 && (T.shoot.ring || m < 520)) {
+        if (e.cool <= 0 && (T.shoot.ring || m < 520 * e.sc)) {
           e.cool = T.shoot.cd;
           const sn = T.shoot.n;
           for (let q = 0; q < sn; q++) {
             const sa = T.shoot.ring
-              ? (q * TAU) / sn + e.age * 0.5
+              ? (q * TAU) / sn + e.age * 0.5 + this.mirA()
               : e.aim + (sn > 1 ? (q - (sn - 1) / 2) * (T.shoot.spread || 0.2) : 0);
             const ex = e.x + Math.cos(sa) * e.r * 1.3, ey = e.y + Math.sin(sa) * e.r * 1.3;
             R.ebul.push({
               x: ex, y: ey, px: e.x, py: e.y,
-              vx: Math.cos(sa) * T.shoot.sp, vy: Math.sin(sa) * T.shoot.sp,
-              r: 7, dmg: T.shoot.dmg, life: 4, tr: [ex, ey, ex, ey],
+              vx: Math.cos(sa) * T.shoot.sp * e.sc, vy: Math.sin(sa) * T.shoot.sp * e.sc,
+              r: 7 * e.sc, dmg: T.shoot.dmg, life: 4, tr: [ex, ey, ex, ey],
             });
           }
         }
@@ -919,9 +1001,11 @@ export class Game {
         e.cool2 -= dt;
         if (e.cool2 <= 0) {
           e.cool2 = T.lays.cd;
+          const m = this.mir();
           R.mines.push({
-            x: tu.x + (Math.random() - 0.5) * 90, y: tu.y + (Math.random() - 0.5) * 90,
-            t: MINE_FUSE, life: MINE_FUSE, r: MINE_R,
+            x: tu.x + (Math.random() - 0.5) * 90 * e.sc * m,
+            y: tu.y + (Math.random() - 0.5) * 90 * e.sc * m,
+            t: MINE_FUSE, life: MINE_FUSE, r: MINE_R * this.roundScale(),
           });
           this.hooks.sfx("mine");
         }
@@ -932,15 +1016,18 @@ export class Game {
         if (e.spawnT <= 0) {
           e.spawnT = T.spawns.cd;
           e.spawnLeft--;
-          this.spawnAt(e.x + (Math.random() - 0.5) * 80, e.y + (Math.random() - 0.5) * 80, T.spawns.t, e.w);
+          const m = this.mir();
+          this.spawnAt(e.x + (Math.random() - 0.5) * 80 * e.sc * m,
+            e.y + (Math.random() - 0.5) * 80 * e.sc * m, T.spawns.t, e.w);
         }
       }
 
       /* contact */
       m = Math.hypot(tu.x - e.x, tu.y - e.y) || 1;
-      if (m < e.r + tu.r && tu.hitCd <= 0 && tu.dozeT <= 0 && !e.hidden) {
+      if (m < e.r + tu.r && tu.hitCd <= 0 && !e.hidden) {
         tu.hp -= e.dmg; tu.hitCd = 0.7;
-        e.x -= ((tu.x - e.x) / m) * 26; e.y -= ((tu.y - e.y) / m) * 26;
+        const kb = 26 * e.sc;
+        e.x -= ((tu.x - e.x) / m) * kb; e.y -= ((tu.y - e.y) / m) * kb;
         if (tu.kind === "player") {
           R.shake = Math.max(R.shake, 4); R.hurtFlash = 1;
           this.hooks.sfx("hurt"); this.hooks.haptic("medium");

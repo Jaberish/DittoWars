@@ -13,8 +13,6 @@ const SOURCES: Record<SfxName, number> = {
   pop: require("../../assets/sfx/pop.wav"),
   hurt: require("../../assets/sfx/hurt.wav"),
   dash: require("../../assets/sfx/dash.wav"),
-  doze: require("../../assets/sfx/doze.wav"),
-  crush: require("../../assets/sfx/crush.wav"),
   nova: require("../../assets/sfx/nova.wav"),
   bloom: require("../../assets/sfx/bloom.wav"),
   bloom3: require("../../assets/sfx/bloom3.wav"),
@@ -28,11 +26,11 @@ const SOURCES: Record<SfxName, number> = {
 };
 
 /** Voices per clip, and the shortest gap between two of them. */
-const VOICES: Partial<Record<SfxName, number>> = { shoot: 4, pop: 5, mine: 3, crush: 3 };
-const GAP: Partial<Record<SfxName, number>> = { shoot: 70, pop: 45, mine: 60, crush: 60 };
+const VOICES: Partial<Record<SfxName, number>> = { shoot: 4, pop: 5, mine: 3 };
+const GAP: Partial<Record<SfxName, number>> = { shoot: 70, pop: 45, mine: 60 };
 const LEVEL: Partial<Record<SfxName, number>> = {
-  shoot: 0.22, pop: 0.3, mine: 0.28, crush: 0.4, hurt: 0.7, boom: 0.6,
-  doze: 0.55, nova: 0.6, form: 0.5, round: 0.6, win: 0.7, lose: 0.7,
+  shoot: 0.22, pop: 0.3, mine: 0.28, hurt: 0.7, boom: 0.6,
+  nova: 0.6, form: 0.5, round: 0.6, win: 0.7, lose: 0.7,
 };
 
 type Pool = { players: AudioPlayer[]; next: number; last: number };
