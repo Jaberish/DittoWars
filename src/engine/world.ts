@@ -1,14 +1,22 @@
 import {
-  ARENA_BASE, ARENA_CAP, ARENA_STEP, BLOOM_LIFE, BLOOM_MUL, BLOOM_R, BLOOM_SEED,
+  ARENA_BASE, ARENA_CAP, ARENA_GROWTH, BLOOM_LIFE, BLOOM_MUL, BLOOM_R, BLOOM_SEED,
   BOMB_AT, BOMB_MAX, BOMB_SEED, BOONS, BOSS_EVERY, DASH_CD, DITTO_CAP,
-  BULLET_SP, DM_SPAWN_END, GHOST_DMG, INTRO_HOLD, PLAYER_R,
+  BULLET_SP, DM_SPAWN_END, GHOST_DMG, HP_GHOST, HP_PER_LEVEL, HP_PLAYER,
+  BOON_CEIL, BOON_RATE, BOSS_HP, DASH_INV, DASH_TIME, HEAL_FRAC, INTRO_HOLD,
+  KNOCK_DECAY, LIVES,
+  PICK_CD, PICK_FROM, PICK_INSET, PICK_LIFE, PICK_R, PICK_SEED, PLAYER_EDGE,
+  MIN_PX, PLAYER_R, REF_PX, SHIELD_TIME, SWEEP_BITE, SWEEP_CD, SWEEP_CROSS,
+  SWEEP_FROM, SWEEP_LANE, SWEEP_SEED, SWEEP_WARN_LONG, SWEEP_WIDTH, cut, sat,
   FORM_COST, SIEGE_CD, SIEGE_FROM, SIEGE_FUSE, SIEGE_OFFSET, SIEGE_R, SIEGE_SEED,
   INTRO_LIFT, MAX_ROUNDS, MINE_DMG, MINE_FUSE, MINE_R, REC_DT, ROUND_TIME,
 } from "./constants";
 import { ETYPES, blockTypes, bossFor, newestTypeAt } from "./enemies";
 import { mkRng } from "./rng";
-import type {
-  Build, Bullet, Enemy, Ghost, Phase, RoundState, RunState, SfxName, Stats, Unit, Wave,
+import type { BoonId } from "./constants";
+import {
+  FORMS,
+  type Build, type Bullet, type Enemy, type Ghost, type Phase, type RoundState,
+  type RunState, type SfxName, type Stats, type Unit, type Wave,
 } from "./types";
 
 export type InputSource = () => [number, number];
@@ -26,7 +34,7 @@ const TAU = Math.PI * 2;
  * `step(dt)`; everything a view needs to draw is readable off `R`.
  */
 export class Game {
-  run: RunState = { round: 1, ghosts: [], popped: 0, build: {} };
+  run: RunState = { round: 1, ghosts: [], popped: 0, build: {}, lives: LIVES };
   R: RoundState | null = null;
   phase: Phase = "menu";
   pendingGhost: Ghost | null = null;
@@ -82,7 +90,7 @@ export class Game {
   }
 
   newRun() {
-    this.run = { round: 1, ghosts: [], popped: 0, build: {} };
+    this.run = { round: 1, ghosts: [], popped: 0, build: {}, lives: LIVES };
     this.pendingGhost = null;
   }
 
@@ -95,7 +103,7 @@ export class Game {
 
   /** Same play area every level; the screen's proportions decide its shape. */
   arenaSize(r: number): [number, number] {
-    const base = ARENA_BASE + Math.min(r - 1, ARENA_CAP) * ARENA_STEP;
+    const base = ARENA_BASE * Game.arenaScale(r);
     const [vw, vh] = this.viewport();
     const asp = Math.max(0.62, Math.min(1.9, vh / vw));
     const k = Math.sqrt(asp);
@@ -113,7 +121,7 @@ export class Game {
    * are frozen the same way, for the same reason.
    */
   static arenaScale(level: number) {
-    return (ARENA_BASE + Math.min(level - 1, ARENA_CAP) * ARENA_STEP) / ARENA_BASE;
+    return Math.pow(ARENA_GROWTH, Math.min(level - 1, ARENA_CAP));
   }
 
   /** The scale of the round being played right now. */
@@ -130,23 +138,37 @@ export class Game {
     // Damage, cooldowns and health are counts, not distances: they do not scale.
     const sc = Game.arenaScale(level);
     return {
-      // Doze used to be a quarter of the team's output — every ditto replayed its
-      // sweep — so the gun carries that share now. Shots-to-kill stays flat across
-      // the run at a little over two; the whole curve is built on that number.
-      dmg: (1 + level * 0.31) *
-        Math.pow(0.97, rapid) * Math.pow(1.05, punch) * Math.pow(0.985, reach),
-      cool: (0.38 / (1 + level * 0.03)) *
-        Math.pow(0.955, rapid) * Math.pow(1.03, punch) *
-        Math.pow(1.015, vigor) * Math.pow(1.02, surge),
-      range: (330 + reach * 18) * sc,
+      // The level gives less than it used to and the build gives more, so what you
+      // picked shapes you more than how far you have come. Stacks saturate, which is
+      // what lets a single pick be worth three times what it used to be without
+      // ninety-nine of them running away with the run.
+      dmg: (1 + level * 0.24) *
+        sat(punch, BOON_CEIL, BOON_RATE) * cut(rapid, 0.18, 0.85) * cut(reach, 0.12, 0.88),
+      cool: (0.38 / (1 + level * 0.03)) / sat(rapid, BOON_CEIL, BOON_RATE) *
+        sat(punch, 0.18, 0.85) * sat(vigor, 0.14, 0.88) * sat(surge, 0.14, 0.88),
+      range: (330 + reach * 34) * sc,
       speed: 210 * sc,
       bulletSp: BULLET_SP * sc,
-      pierce: Math.floor(reach / 4),
-      hpBonus: vigor * 1.5,
-      novaCd: Math.max(2.5, 7 - surge * 0.25),
-      novaR: (170 + surge * 8) * sc,
+      pierce: Math.floor(reach / 3),
+      hpBonus: vigor * 2.5,
+      novaCd: Math.max(2.2, 7 - surge * 0.5),
+      novaR: (170 + surge * 18) * sc,
       scale: sc,
     };
+  }
+
+  /** The concrete gain from taking this boon once more, given what you already hold. */
+  static boonGain(id: BoonId, b: Build): string {
+    const n = b[id] || 0;
+    const step = Math.round(
+      (sat(n + 1, BOON_CEIL, BOON_RATE) / sat(n, BOON_CEIL, BOON_RATE) - 1) * 100);
+    switch (id) {
+      case "rapid": return `+${step}% fire rate`;
+      case "punch": return `+${step}% damage`;
+      case "vigor": return "+2.5 health";
+      case "reach": return (n + 1) % 3 === 0 ? "+34 range, +1 pierce" : "+34 range";
+      default: return "Pop −0.5s, +18 wide";
+    }
   }
 
   static buildLabel(b: Build) {
@@ -160,12 +182,12 @@ export class Game {
 
   private mkUnit(kind: "player" | "ghost", x: number, y: number, level: number, hue: number, build?: Build): Unit {
     const s = Game.stats(level, build);
-    const hp = (kind === "player" ? 6 : 4) + level * 0.3 + s.hpBonus;
+    const hp = (kind === "player" ? HP_PLAYER : HP_GHOST) + level * HP_PER_LEVEL + s.hpBonus;
     return {
       kind, x, y, r: Game.radiusFor(level),
       hp, max: hp, level, st: s, hue,
       fire: Math.random() * 0.25, alive: true, hitCd: 0, aim: 0, muzzle: 0,
-      dashT: 0, dashCd: 0, novaCd: 0,
+      dashT: 0, dashCd: 0, novaCd: 0, shield: 0, dashInv: 0,
       lastDir: [1, 0], evi: 0, cyc: -1, g: null, ofx: 0, ofy: 0, fade: 1,
       age: 0, dur: 0, vx: 0, vy: 0, born: 0,
     };
@@ -174,13 +196,14 @@ export class Game {
   /* ================= waves ================= */
 
   /**
-   * Every third wave arrives as a shape instead of a trickle, twice over, and a
-   * wave replays identically for the rest of the run — so the same set-piece lands
-   * on the same beat, level after level.
+   * Every other wave arrives as a shape instead of a trickle, and a wave replays
+   * identically for the rest of the run — so the same set-piece lands on the same
+   * beat, level after level. Six shapes, cycling: a wave you have fought before is
+   * recognisable by the way it walks in.
    */
   private formationFor(k: number): Wave["form"] {
-    if (k % 3 !== 0) return null;
-    return (["ring", "line", "pincer"] as const)[Math.floor(k / 3) % 3];
+    if (k % 2 !== 0) return null;
+    return FORMS[Math.floor(k / 2) % FORMS.length];
   }
 
   private mkWave(k: number): Wave {
@@ -189,7 +212,16 @@ export class Game {
     // team of one. Toughness still scales with the absolute level.
     const lk = ((k - 1) % BOSS_EVERY) + 1;
     let n = Math.min(9 + Math.floor(lk * 1.4), 24);
-    if (this.isBoss()) n = Math.max(4, Math.round(n * 0.55));
+    // The first ten levels are the only stretch of the run fought short-handed: the
+    // squad is still assembling, and a wave sized for eighteen dittos landing on four
+    // thin bubbles is not a difficulty curve, it is a wall. Every wave is thinned to
+    // the team that has to meet it — which stops mattering at level nineteen, where
+    // the squad hits its cap and stays there for the rest of the game.
+    const squad = Math.min(1, (this.run.ghosts.length + 1) / DITTO_CAP);
+    n = Math.max(4, Math.round(n * (0.55 + 0.45 * squad)));
+    // A deathmatch is team against team with no clock to survive to, so being
+    // short-handed costs more here than anywhere else and is discounted again.
+    if (this.isBoss()) n = Math.max(4, Math.round(n * 0.55 * (0.62 + 0.38 * squad)));
     if (this.isBoss() && this.run.round === BOSS_EVERY) n = Math.max(3, Math.round(n * 0.6));
     const rng = mkRng(k * 9176 + 1337);
     // Every wave in the block runs on the same clock, so without a per-wave offset
@@ -217,6 +249,9 @@ export class Game {
     const R: RoundState = {
       t: 0, over: false, reason: "", shake: 0, hitStop: 0, hurtFlash: 0,
       units: [], enemies: [], bullets: [], ebul: [], mines: [], fx: [], amb: [],
+      pickups: [], pickRng: mkRng(PICK_SEED + this.bloomBlock() * 6151), pickNext: 6,
+      sweep: null, sweepRng: mkRng(SWEEP_SEED + this.bloomBlock() * 2749),
+      sweepNext: SWEEP_CD * 0.6,
       rec: { pts: [], events: [] }, recAcc: 0,
       waves: [], popped: 0, army: 0,
       bloom: null, bloomRng: mkRng(BLOOM_SEED + this.bloomBlock() * 7919), bloomAcc: 4,
@@ -292,7 +327,7 @@ export class Game {
     if (this.phase !== "playing") return;
     const p = this.R!.player;
     if (!p.alive || p.dashCd > 0) return;
-    p.dashCd = DASH_CD; p.dashT = 0.16;
+    p.dashCd = DASH_CD; p.dashT = DASH_TIME; p.dashInv = DASH_INV;
     this.hooks.sfx("dash");
     this.hooks.haptic("light");
   }
@@ -310,6 +345,29 @@ export class Game {
 
   /* ================= combat ================= */
 
+  /** Would this land on screen smaller than a couple of pixels? */
+  private tooSmall(r: number) {
+    const R = this.R!;
+    return r < (MIN_PX / REF_PX) * Math.min(R.W, R.H);
+  }
+
+  /** Push something a distance, over time, instead of moving it there. */
+  private shove(e: Enemy, dx: number, dy: number, dist: number) {
+    e.kx += dx * dist * KNOCK_DECAY;
+    e.ky += dy * dist * KNOCK_DECAY;
+  }
+
+  /**
+   * Damage to one of yours. A shield eats the hit outright — it is the only thing in
+   * the game that says no, which is what makes the walk out to the wall worth it.
+   */
+  private hurtUnit(u: Unit, dmg: number): boolean {
+    if (u.shield > 0) return false;
+    u.hp -= dmg;
+    if (u.hp <= 0) { u.hp = 0; u.alive = false; }
+    return true;
+  }
+
   private hurtEnemy(e: Enemy, dmg: number, j: number): boolean {
     const T = ETYPES[e.type];
     if (T.invuln || e.hidden) return false;
@@ -322,7 +380,7 @@ export class Game {
   private nova(u: Unit, power: number) {
     const R = this.R!;
     const rad = u.st.novaR;
-    const dmg = 6 * power * (u.kind === "ghost" ? GHOST_DMG : 1);
+    const dmg = 6 * power * (u.kind === "ghost" ? GHOST_DMG : PLAYER_EDGE);
     R.fx.push({ x: u.x, y: u.y, t: 0, life: 0.55, rad, hue: u.hue, ring: true, width: 6 });
     R.fx.push({ x: u.x, y: u.y, t: 0, life: 0.34, rad: rad * 0.55, hue: u.hue, ring: true, width: 3 });
     if (u.kind === "player") { R.shake = Math.max(R.shake, 6); this.hooks.sfx("nova"); }
@@ -330,8 +388,7 @@ export class Game {
       const e = R.enemies[i];
       const dx = e.x - u.x, dy = e.y - u.y, d = Math.hypot(dx, dy) || 1;
       if (d < rad) {
-        const kb = 46 * u.st.scale;
-        e.x += (dx / d) * kb; e.y += (dy / d) * kb;
+        this.shove(e, dx / d, dy / d, 46 * u.st.scale);
         this.hurtEnemy(e, dmg, i);
       }
     }
@@ -366,9 +423,8 @@ export class Game {
         if (Math.hypot(uz.x - e.x, uz.y - e.y) < T.explode.r * e.sc) {
           // Full price for you, half for a ditto: you choose where you stand, and a
           // recording cannot dodge a blast that was not there when it played.
-          uz.hp -= T.explode.dmg * (uz.kind === "player" ? 1 : 0.5);
-          if (uz.kind === "player") { this.hooks.sfx("hurt"); R.hurtFlash = 1; }
-          if (uz.hp <= 0) uz.alive = false;
+          const took = this.hurtUnit(uz, T.explode.dmg * (uz.kind === "player" ? 1 : 0.5));
+          if (took && uz.kind === "player") { this.hooks.sfx("hurt"); R.hurtFlash = 1; }
         }
       }
     }
@@ -376,11 +432,13 @@ export class Game {
     if (T.boss) { R.shake = Math.max(R.shake, 14); R.hitStop = Math.max(R.hitStop, 0.16); }
 
     R.fx.push({ x: e.x, y: e.y, t: 0, life: 0.34, rad: e.r * 1.35, hue: T.hue, ring: true, width: 4 });
+    // In arena units like everything else: these were written in raw pixels and had
+    // quietly become sub-pixel specks that barely moved once the camera pulled back.
     for (let k2 = 0; k2 < 6; k2++)
       R.fx.push({
         x: e.x, y: e.y, t: 0, life: 0.34 + Math.random() * 0.2, pop: true,
-        vx: (Math.random() - 0.5) * 210, vy: (Math.random() - 0.5) * 210,
-        rad: 2 + Math.random() * 4, hue: T.hue,
+        vx: (Math.random() - 0.5) * 210 * e.sc, vy: (Math.random() - 0.5) * 210 * e.sc,
+        rad: (2 + Math.random() * 4) * e.sc, hue: T.hue,
       });
     // Shards spin off the bigger ones, so a heavy kill reads heavier than a mote.
     if (e.r > 12)
@@ -404,14 +462,31 @@ export class Game {
 
   private spawnAt(x: number, y: number, type: string, k: number, wob?: number, scale?: number) {
     const R = this.R!, t = ETYPES[type];
-    let hp = (3 + (k - 1) * 0.7) * t.hp;     // wave k is as tough as ditto k is strong
+    // Wave k is as tough as ditto k is strong — and within that wave, the newer a
+    // type is the harder it is to put down. A wave's roster runs from things you met
+    // in your first ten levels to the one this level just introduced, so the debut is
+    // always the thing in the wave you cannot ignore. Measured against the wave, not
+    // in absolute terms, so meeting a new type is a step up without the level's total
+    // toughness drifting.
+    const debut = 0.72 + 0.58 * Math.min(1, t.at / k);
+    // The quadratic term pays for the boons. A saturating build front-loads its
+    // power, so by the late levels a team is carrying more than a linear curve was
+    // written for; this is the difference, and it keeps shots-to-kill flat.
+    const wave = 3 + (k - 1) * 0.7 + (k - 1) * (k - 1) * 0.006;
+    let hp = wave * t.hp * debut;
+    // A full squad melts a boss in seconds otherwise: eighteen dittos and a player at
+    // double strength put out more damage than any single body was written for.
+    if (t.boss) hp *= BOSS_HP;
     if (t.boss && this.run.round === BOSS_EVERY) hp *= 0.7;   // first boss, first lesson
     // Frozen at its wave's scale, exactly like a ditto: an old wave is a smaller
     // wave, and the size difference is the same signal in both directions.
     const sc = scale ?? Game.arenaScale(k);
+    const r = t.r * sc * (type === "mote" ? 0.6 : 1);
+    // Too small to see is too small to be worth a slot in the loop.
+    if (this.tooSmall(r)) return;
     R.enemies.push({
       x, y, hp, max: hp, type, dmg: t.dmg, w: k, flash: 0, sc,
-      r: t.r * sc * (type === "mote" ? 0.6 : 1),
+      r,
       sp: (52 + Math.min(k * 2, 46)) * t.sp * sc,
       wind: 1.2 + Math.random() * 1.6, dashT: 0, dd: [0, 0], aim: 0,
       cool: 0.6 + Math.random() * 1.6, cool2: 1 + Math.random(),
@@ -420,6 +495,7 @@ export class Game {
       ph: Math.random() * 3, hidden: false, bk: 1 + Math.random() * 2,
       jt: 0.7 + Math.random() * 1.5, jT: 0, jdir: 1,
       wob: wob === undefined ? Math.random() * 6.28 : wob,
+      kx: 0, ky: 0,
       born: R.t,
     });
   }
@@ -481,39 +557,69 @@ export class Game {
     const R = this.R!, { W, H } = R;
     const rnd = wv.rng, t = this.pickType(wv.k, rnd), sc = this.roundScale();
     const pad = 26 * sc;
+    const cx = W / 2, cy = H / 2, span = Math.min(W, H);
+    const at = (fx: number, fy: number, wob = 0) => {
+      const [px, py] = this.place(fx, fy);
+      this.spawnAt(px, py, t, wv.k, wob);
+    };
+
     if (wv.form === "ring") {
-      const rad = Math.min(W, H) * 0.42;
+      // closing in from every direction at once
+      const rad = span * 0.42;
       for (let q = 0; q < 10; q++) {
         const ang = (q * TAU) / 10;
-        const [fx, fy] = this.place(W / 2 + Math.cos(ang) * rad, H / 2 + Math.sin(ang) * rad);
-        this.spawnAt(fx, fy, t, wv.k, ang);
+        at(cx + Math.cos(ang) * rad, cy + Math.sin(ang) * rad, ang);
       }
     } else if (wv.form === "line") {
+      // one rank, abreast, over a single edge
       const side = (rnd() * 4) | 0;
       for (let q = 0; q < 8; q++) {
         const u = (q + 0.5) / 8;
-        const at = (fx: number, fy: number) => {
-          const [px, py] = this.place(fx, fy);
-          this.spawnAt(px, py, t, wv.k, 0);
-        };
         if (side === 0) at(u * W, -pad);
         else if (side === 1) at(u * W, H + pad);
         else if (side === 2) at(-pad, u * H);
         else at(W + pad, u * H);
       }
-    } else {
+    } else if (wv.form === "pincer") {
+      // two columns, opposite edges, squeezing
       const horiz = rnd() < 0.5;
       for (let sd = 0; sd < 2; sd++)
         for (let q = 0; q < 5; q++) {
           const j = (q - 2) * 48 * sc;
-          const [px, py] = horiz
-            ? this.place(sd ? W + pad : -pad, H * 0.5 + j)
-            : this.place(W * 0.5 + j, sd ? H + pad : -pad);
-          this.spawnAt(px, py, t, wv.k, 0);
+          if (horiz) at(sd ? W + pad : -pad, cy + j);
+          else at(cx + j, sd ? H + pad : -pad);
+        }
+    } else if (wv.form === "arc") {
+      // a crescent across one side of the arena, all of it facing you
+      const base = rnd() * TAU, rad = span * 0.46;
+      for (let q = 0; q < 9; q++) {
+        const ang = base + (q / 8 - 0.5) * 2.2;
+        at(cx + Math.cos(ang) * rad, cy + Math.sin(ang) * rad, ang);
+      }
+    } else if (wv.form === "wedge") {
+      // a spearhead aimed at the middle, tip first
+      const ang = rnd() * TAU, ca = Math.cos(ang), sa = Math.sin(ang);
+      const rad = span * 0.5, step = 46 * sc;
+      for (let arm = -1; arm <= 1; arm += 2)
+        for (let q = 0; q < 4; q++) {
+          const back = rad + q * step * 1.15, side2 = arm * (q + 1) * step * 0.72;
+          at(cx + ca * back - sa * side2, cy + sa * back + ca * side2, ang + Math.PI);
+        }
+      at(cx + ca * rad, cy + sa * rad, ang + Math.PI);   // the point of the spear
+    } else {
+      // a block held off one edge, then walked in together
+      const side = (rnd() * 4) | 0, gap = 54 * sc;
+      for (let row = 0; row < 3; row++)
+        for (let q = 0; q < 4; q++) {
+          const across = (q - 1.5) * gap * 1.4, deep = pad + row * gap;
+          if (side === 0) at(cx + across, -deep);
+          else if (side === 1) at(cx + across, H + deep);
+          else if (side === 2) at(-deep, cy + across);
+          else at(W + deep, cy + across);
         }
     }
     R.fx.push({
-      x: W / 2, y: H / 2, t: 0, life: 0.9, rad: Math.min(W, H) * 0.44,
+      x: cx, y: cy, t: 0, life: 0.9, rad: span * 0.44,
       hue: ETYPES[t].hue, ring: true, width: 6,
     });
     R.shake = Math.max(R.shake, 5);
@@ -668,7 +774,7 @@ export class Game {
             R.bullets.push({
               x: bx, y: by, px: u.x, py: u.y,
               vx: Math.cos(sa) * bs, vy: Math.sin(sa) * bs,
-              dmg: u.st.dmg * (u.kind === "ghost" ? GHOST_DMG : 1),
+              dmg: u.st.dmg * (u.kind === "ghost" ? GHOST_DMG : PLAYER_EDGE),
               life: 1.1, r: u.r * 0.3 * (u.kind === "ghost" ? 0.8 : 1),
               pierce: u.st.pierce, hit: null, hue: u.hue, ghost: u.kind === "ghost",
               tr: [bx, by, bx, by, bx, by],
@@ -703,6 +809,9 @@ export class Game {
         R.siegeShot = 0;
       }
     }
+
+    this.stepPickups(dt);
+    this.stepSweep(dt);
 
     /* --- shells fall on the bloom, so the best floor in the arena is never free --- */
     if (this.run.round >= SIEGE_FROM && R.bloom) {
@@ -788,9 +897,10 @@ export class Game {
       for (const uz of R.units) {
         if (!uz.alive) continue;
         if (Math.hypot(uz.x - mn.x, uz.y - mn.y) < mn.r) {
-          uz.hp -= MINE_DMG * (uz.kind === "player" ? 1 : 0.5);
-          if (uz.kind === "player") { this.hooks.sfx("hurt"); R.hurtFlash = 1; this.hooks.haptic("heavy"); }
-          if (uz.hp <= 0) uz.alive = false;
+          const took = this.hurtUnit(uz, MINE_DMG * (uz.kind === "player" ? 1 : 0.5));
+          if (took && uz.kind === "player") {
+            this.hooks.sfx("hurt"); R.hurtFlash = 1; this.hooks.haptic("heavy");
+          }
         }
       }
     }
@@ -809,12 +919,11 @@ export class Game {
         if (!uu.alive) continue;
         const rr2 = uu.r + eb.r;
         if (Game.segDist2(eb.px, eb.py, eb.x, eb.y, uu.x, uu.y) < rr2 * rr2) {
-          uu.hp -= eb.dmg;
-          if (uu.kind === "player") {
+          const took = this.hurtUnit(uu, eb.dmg);
+          if (took && uu.kind === "player") {
             this.hooks.sfx("hurt"); R.shake = Math.max(R.shake, 4);
             R.hurtFlash = 1; this.hooks.haptic("medium");
           }
-          if (uu.hp <= 0) uu.alive = false;
           R.ebul.splice(i, 1);
           break;
         }
@@ -854,6 +963,119 @@ export class Game {
     if (R.over) this.endRound();
   }
 
+  /** Relief against the wall, where the enemies come in. */
+  private stepPickups(dt: number) {
+    const R = this.R!, p = R.player;
+    if (this.run.round >= PICK_FROM) {
+      R.pickNext -= dt;
+      if (R.pickNext <= 0) {
+        R.pickNext = PICK_CD;
+        const rng = R.pickRng;
+        const side = (rng() * 4) | 0, u = 0.12 + rng() * 0.76;
+        const inx = R.W * PICK_INSET, iny = R.H * PICK_INSET;
+        let x: number, y: number;
+        if (side === 0) { x = R.W * u; y = iny; }
+        else if (side === 1) { x = R.W * u; y = R.H - iny; }
+        else if (side === 2) { x = inx; y = R.H * u; }
+        else { x = R.W - inx; y = R.H * u; }
+        const [px, py] = this.place(x, y);
+        R.pickups.push({
+          x: px, y: py, r: PICK_R * this.roundScale(),
+          kind: rng() < 0.5 ? "shield" : "heal",
+          t: PICK_LIFE, life: PICK_LIFE,
+        });
+      }
+    }
+    for (let i = R.pickups.length - 1; i >= 0; i--) {
+      const pk = R.pickups[i];
+      pk.t -= dt;
+      if (pk.t <= 0) { R.pickups.splice(i, 1); continue; }
+      // Yours alone. A recording cannot pick anything up, and this is one more thing
+      // only the living player can do.
+      if (!p.alive) continue;
+      const rr = pk.r + p.r;
+      if ((p.x - pk.x) * (p.x - pk.x) + (p.y - pk.y) * (p.y - pk.y) > rr * rr) continue;
+      R.pickups.splice(i, 1);
+      if (pk.kind === "heal") p.hp = Math.min(p.max, p.hp + p.max * HEAL_FRAC);
+      else p.shield = SHIELD_TIME;
+      R.fx.push({
+        x: pk.x, y: pk.y, t: 0, life: 0.5, rad: pk.r * 2.6,
+        hue: pk.kind === "heal" ? 140 : 185, ring: true, width: 5,
+      });
+      this.hooks.sfx("bloom");
+      this.hooks.haptic("medium");
+    }
+    p.shield = Math.max(0, p.shield - dt);
+    p.dashInv = Math.max(0, p.dashInv - dt);
+  }
+
+  /**
+   * A band crosses the arena, announced first. Everything on the floor is hit once as
+   * it passes: enough to end a ditto, a scratch to an enemy, and avoidable if you are
+   * the one thing here that can still react.
+   */
+  private stepSweep(dt: number) {
+    const R = this.R!;
+    if (!R.sweep) {
+      if (this.run.round < SWEEP_FROM) return;
+      R.sweepNext -= dt;
+      if (R.sweepNext > 0) return;
+      R.sweepNext = SWEEP_CD;
+      const rng = R.sweepRng;
+      const horiz = rng() < 0.5;
+      const span = horiz ? R.W : R.H;
+      const w = SWEEP_WIDTH * this.roundScale();
+      let a = -w, b = span + w;
+      if (rng() < 0.5) { const t = a; a = b; b = t; }
+      if (this.flipped) { a = span - a; b = span - b; }
+      // A lane across part of the floor, not the whole of it: what it takes is the
+      // part of the squad standing in the wrong place, and a bite sized to finish
+      // something already hurt rather than to erase a healthy one.
+      const far = horiz ? R.H : R.W;
+      const lane = far * SWEEP_LANE;
+      const lo = rng() * (far - lane);
+      const ghostHp = HP_GHOST + this.run.round * HP_PER_LEVEL;
+      R.sweep = {
+        horiz, from: a, to: b, pos: a, width: w,
+        lo: this.flipped ? far - lo - lane : lo, hi: 0,
+        warn: SWEEP_WARN_LONG, k: ghostHp * SWEEP_BITE, hit: [],
+      };
+      R.sweep.hi = R.sweep.lo + lane;
+      this.hooks.sfx("form");
+      return;
+    }
+    const s = R.sweep;
+    if (s.warn > 0) { s.warn -= dt; if (s.warn <= 0) this.hooks.haptic("heavy"); return; }
+    s.pos += ((s.to - s.from) / SWEEP_CROSS) * dt;
+    const done = s.to > s.from ? s.pos >= s.to : s.pos <= s.to;
+    for (const u of R.units) {
+      if (!u.alive || s.hit.indexOf(u) >= 0) continue;
+      const c = s.horiz ? u.x : u.y, f = s.horiz ? u.y : u.x;
+      if (Math.abs(c - s.pos) > s.width * 0.5 + u.r) continue;
+      if (f < s.lo - u.r || f > s.hi + u.r) continue;
+      // Dashed over it. Deliberately not marked as struck: if the dash ends while
+      // still inside the band, it catches you — you have to clear it, not just blink.
+      if (u.dashInv > 0) continue;
+      s.hit.push(u);
+      const took = this.hurtUnit(u, s.k);
+      if (took && u.kind === "player") {
+        this.hooks.sfx("hurt"); R.hurtFlash = 1;
+        R.shake = Math.max(R.shake, 7); this.hooks.haptic("heavy");
+      }
+    }
+    for (let i = R.enemies.length - 1; i >= 0; i--) {
+      const e = R.enemies[i];
+      if (ETYPES[e.type].invuln || e.hidden) continue;
+      const c = s.horiz ? e.x : e.y, f = s.horiz ? e.y : e.x;
+      if (Math.abs(c - s.pos) > s.width * 0.5 + e.r) continue;
+      if (f < s.lo - e.r || f > s.hi + e.r) continue;
+      if (e.sweptBy === s) continue;
+      e.sweptBy = s;
+      this.hurtEnemy(e, s.k, i);
+    }
+    if (done) R.sweep = null;
+  }
+
   /* --- enemies: one pass, driven by whatever traits the type declares --- */
   private stepEnemies(dt: number) {
     const R = this.R!, { W, H } = R;
@@ -866,6 +1088,12 @@ export class Game {
       const e = R.enemies[i], T = ETYPES[e.type];
       e.flash = Math.max(0, (e.flash || 0) - dt * 5);
       e.age += dt;
+      if (e.kx || e.ky) {
+        e.x += e.kx * dt; e.y += e.ky * dt;
+        const bleed = Math.exp(-dt * KNOCK_DECAY);
+        e.kx *= bleed; e.ky *= bleed;
+        if (Math.abs(e.kx) + Math.abs(e.ky) < 1) { e.kx = 0; e.ky = 0; }
+      }
       if (T.regen && e.hp < e.max) e.hp = Math.min(e.max, e.hp + T.regen * dt);
       if (T.phase) {
         e.ph += dt;
@@ -1025,14 +1253,13 @@ export class Game {
       /* contact */
       m = Math.hypot(tu.x - e.x, tu.y - e.y) || 1;
       if (m < e.r + tu.r && tu.hitCd <= 0 && !e.hidden) {
-        tu.hp -= e.dmg; tu.hitCd = 0.7;
-        const kb = 26 * e.sc;
-        e.x -= ((tu.x - e.x) / m) * kb; e.y -= ((tu.y - e.y) / m) * kb;
-        if (tu.kind === "player") {
+        const took = this.hurtUnit(tu, e.dmg);
+        tu.hitCd = 0.7;
+        this.shove(e, -(tu.x - e.x) / m, -(tu.y - e.y) / m, 26 * e.sc);
+        if (took && tu.kind === "player") {
           R.shake = Math.max(R.shake, 4); R.hurtFlash = 1;
           this.hooks.sfx("hurt"); this.hooks.haptic("medium");
         }
-        if (tu.hp <= 0) tu.alive = false;
       }
     }
   }
@@ -1071,12 +1298,33 @@ export class Game {
 
   /* ================= round end ================= */
 
+  /** Whether the level just played can be attempted again. */
+  canRetry() {
+    const R = this.R;
+    return !!R && this.run.lives > 0 && (R.reason === "popped" || R.reason === "wiped");
+  }
+
+  /** Spend a life and play the same level over. The failed attempt leaves nothing. */
+  retry() {
+    if (!this.canRetry()) return;
+    this.run.lives--;
+    this.pendingGhost = null;
+    this.startRound();
+  }
+
   private endRound() {
     const R = this.R!;
-    if (R.reason === "wiped" || (this.isFinal() && R.reason === "cleared")) {
+    if (this.isFinal() && R.reason === "cleared") {
       this.pendingGhost = null;
       this.setPhase("finish");
-      this.hooks.sfx(R.reason === "cleared" ? "win" : "lose");
+      this.hooks.sfx("win");
+      return;
+    }
+    if (R.reason === "wiped") {
+      // A wipe leaves no recording to keep, so the only way on is another attempt.
+      this.pendingGhost = null;
+      if (this.run.lives > 0) { this.setPhase("end"); this.hooks.sfx("lose"); }
+      else { this.setPhase("finish"); this.hooks.sfx("lose"); }
       return;
     }
     const dur = (R.rec.pts.length / 2) * REC_DT;
@@ -1090,16 +1338,16 @@ export class Game {
     this.setPhase("end");
   }
 
-  /** Nothing here edits a past round; the new ditto simply joins the squad. */
-  acceptGhost() {
+  /**
+   * Take the ditto and the boon in one move. Nothing here edits a past round: the
+   * recording joins the squad as it stands, and the only choice is the one boon that
+   * shapes the level ahead — and the ditto that level will leave behind.
+   */
+  advance(id: keyof Build) {
     if (!this.pendingGhost) return;
     this.run.ghosts.push(this.pendingGhost);
     this.pendingGhost = null;
     this.run.round++;
-    this.setPhase("boons");
-  }
-
-  pickBoon(id: keyof Build) {
     this.run.build[id] = (this.run.build[id] || 0) + 1;
     this.startRound();
   }

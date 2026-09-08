@@ -109,8 +109,9 @@ function Act({ label, onPress, ghost, index }: {
   );
 }
 
-function Screen({ eyebrow, title, children, gold }: {
-  eyebrow: string; title: string; children: React.ReactNode; gold?: boolean;
+function Screen({ eyebrow, title, children, gold, onRestart }: {
+  eyebrow: string; title: string; children: React.ReactNode;
+  gold?: boolean; onRestart?: () => void;
 }) {
   const k = useSharedValue(0);
   useEffect(() => { k.value = withTiming(1, { duration: 320, easing: OUT }); }, [k]);
@@ -133,6 +134,16 @@ function Screen({ eyebrow, title, children, gold }: {
         </Animated.View>
         {children}
       </ScrollView>
+      {onRestart && (
+        <Pressable
+          onPress={onRestart}
+          hitSlop={12}
+          accessibilityLabel="Menu"
+          style={styles.corner}
+        >
+          <Text style={styles.cornerGlyph}>☰</Text>
+        </Pressable>
+      )}
     </Animated.View>
   );
 }
@@ -194,28 +205,25 @@ function Squad({ ghosts, label, index }: { ghosts: Ghost[]; label: string; index
 export function MenuScreen({ onStart }: { onStart: () => void }) {
   return (
     <Screen eyebrow="Arena shooter" title="Ditto Wars">
-      <Body index={1}>An arena shooter where your past selves fight beside you.</Body>
+      <Body index={1}>Your past selves fight beside you.</Body>
       <Rise index={2} style={styles.rules}>
-        <Rule tint={T.film} title="You.">
-          You move. The gun aims and fires on its own.
+        <Rule tint={T.film} title="You">Move. The gun aims itself.</Rule>
+        <Rule tint={T.leaf} title="Dittos">
+          Every round is recorded and replays on your side, for the rest of the run.
         </Rule>
-        <Rule tint={T.leaf} title="Your dittos.">
-          Every round is recorded and replayed the next round, fighting on your side.
-          Go down early and you get a short ditto — forever.
-        </Rule>
-        <Rule tint={T.ember} title="The waves.">
-          Every level you play adds its wave to the fight. 100 levels in blocks of
-          ten: each tenth is a boss deathmatch, and clearing it wipes every enemy
-          away — a fresh cast and new blooms for the next ten. Your dittos keep coming.
+        <Rule tint={T.ember} title="Waves">
+          Each level adds its wave. Every tenth is a deathmatch.
         </Rule>
       </Rise>
       <Rise index={3}>
-        <Text style={styles.note}>
-          Drag anywhere to move. Stand in a <Text style={styles.strong}>bloom</Text> for
-          faster fire or a triple shot — they land in the same places every level, and
-          your dittos pick them up too. After the first deathmatch something starts
-          shelling them, so you have to keep moving to hold one.
-        </Text>
+        <View style={styles.facts}>
+          {[["100", "levels"], ["3", "lives"], ["41", "enemies"]].map(([n, l]) => (
+            <View key={l} style={styles.fact}>
+              <Text style={styles.factN}>{n}</Text>
+              <Text style={styles.factL}>{l}</Text>
+            </View>
+          ))}
+        </View>
       </Rise>
       <Act label="Start run" onPress={onStart} index={4} />
     </Screen>
@@ -227,94 +235,110 @@ function Rule({ tint, title, children }: { tint: string; title: string; children
     <View style={styles.rule}>
       <View style={[styles.ruleDot, { backgroundColor: tint }]} />
       <Text style={styles.ruleText}>
-        <Text style={styles.strong}>{title}</Text> {children}
+        <Text style={styles.strong}>{title}</Text>
+        <Text style={styles.ruleDash}> — </Text>
+        {children}
       </Text>
     </View>
   );
 }
 
-export function BoonScreen({ round, boss, final, build, onPick }: {
-  round: number; boss: boolean; final: boolean;
+export function EndScreen({
+  round, reason, ghost, ghosts, popped, lives, canRetry, boss, final, build,
+  onAdvance, onRetry, onRestart,
+}: {
+  round: number;
+  reason: string;
+  ghost: Ghost | null;
+  ghosts: Ghost[];
+  popped: number;
+  lives: number;
+  canRetry: boolean;
+  boss: boolean;
+  final: boolean;
   build: Record<string, number | undefined>;
-  onPick: (b: Boon) => void;
+  onAdvance: (b: Boon) => void;
+  onRetry: () => void;
+  onRestart: () => void;
 }) {
-  // three of the five, drawn fresh each level
+  const wipes = round % 10 === 0 && reason === "cleared";
+  const nextIsBoss = (round + 1) % 10 === 0;
+  const next = round + 1;
+
+  // three of the five, drawn fresh for the level ahead
   const pick = useMemo(() => {
     const pool = BOONS.slice(), out: Boon[] = [];
     while (out.length < 3 && pool.length)
       out.push(pool.splice((Math.random() * pool.length) | 0, 1)[0]);
     return out;
-  }, [round]);
+  }, [round, reason]);
 
+  const body = reason === "wiped"
+    ? "A wipe leaves **no recording**. Spend a life and walk back in."
+    : wipes
+      ? "The board is wiped — **a fresh cast** for the next ten levels. Your dittos stay."
+      : ghost?.full
+        ? ""
+        : "Cut short. This ditto only ever fights **part** of a level — spend a life to run it again.";
+
+  const title = reason === "wiped" ? "Your team was wiped out"
+    : reason === "cleared" ? "Deathmatch won"
+      : ghost?.full ? "Level survived" : "You got popped";
+
+  let i = 1;
   return (
     <Screen
-      eyebrow={`Level ${round} of ${MAX_ROUNDS}${final ? " · the last one" : boss ? " · deathmatch" : ""}`}
-      title="Pick a boon"
-      gold={boss}
-    >
-      <Body index={1}>
-        {final
-          ? "Last pick of the run. Spend it on holding the arena."
-          : "Small, and permanent. It shapes the level you are about to play, and **the ditto it records keeps it forever**."}
-      </Body>
-      {pick.map((b, i) => {
-        const have = build[b.id] || 0;
-        return (
-          <Card key={b.id} index={2 + i} onPress={() => onPick(b)}>
-            <View style={[styles.dot, { backgroundColor: `hsl(${b.hue},72%,64%)` }]} />
-            <View style={styles.cardText}>
-              <Text style={styles.cardTitle}>{b.name}{have ? ` ×${have + 1}` : ""}</Text>
-              <Text style={styles.cardSub}>{b.desc}</Text>
-            </View>
-          </Card>
-        );
-      })}
-    </Screen>
-  );
-}
-
-export function EndScreen({ round, reason, ghost, ghosts, popped, onNext, onRestart }: {
-  round: number;
-  reason: string;
-  ghost: Ghost;
-  ghosts: Ghost[];
-  popped: number;
-  onNext: () => void;
-  onRestart: () => void;
-}) {
-  const wipes = round % 10 === 0;
-  const nextIsBoss = (round + 1) % 10 === 0;
-  const body = wipes
-    ? "Every wave you have been fighting is wiped — **a fresh cast of enemies** for the next ten levels, and blooms in new places. **Your dittos stay**; they just have nothing left to fight from before, so the next ten levels build a new set for them."
-    : ghost.full
-      ? `A full recording. This ditto fights the whole level at **level ${ghost.level}** size and firepower, frozen there forever — and that level's wave comes back with it.` +
-        (nextIsBoss
-          ? round + 1 === MAX_ROUNDS
-            ? " **Next is level 100** — no clock, and the run ends there one way or the other."
-            : " **Next is a deathmatch** — no clock, it runs until one team is wiped, and clearing it wipes the board."
-          : "")
-      : "You went down early, so this ditto only fights for **part** of every future level — but that level's wave still shows up in full." +
-        (nextIsBoss ? " **Next is a deathmatch** — no clock, and clearing it wipes the board." : "");
-
-  return (
-    <Screen
-      eyebrow={`Level ${round} of ${MAX_ROUNDS} · ${popped} popped · ${Math.min(DITTO_CAP, ghosts.length + 1)} fielded`}
-      title={reason === "cleared" ? "Deathmatch won" : ghost.full ? "Level survived" : "You got popped"}
+      eyebrow={`Level ${round} · ${popped} popped · ` +
+        `${Math.min(DITTO_CAP, ghosts.length + (ghost ? 1 : 0))} dittos · ` +
+        `${lives} ${lives === 1 ? "life" : "lives"}`}
+      title={title}
       gold={reason === "cleared"}
+      onRestart={onRestart}
     >
-      <Body index={1}>{body}</Body>
-      <GhostCard g={ghost} fresh index={2} />
-      <Squad ghosts={ghosts} label="Squad so far" index={3} />
-      <Act
-        index={4}
-        label={
-          wipes ? `New enemies · level ${round + 1}`
-            : nextIsBoss ? "Enter the deathmatch"
-              : `Start level ${round + 1}`
-        }
-        onPress={onNext}
-      />
-      <Act label="Restart run" onPress={onRestart} ghost index={5} />
+      {!!body && <Body index={i++}>{body}</Body>}
+      {ghost && <GhostCard g={ghost} fresh index={i++} />}
+      <Squad ghosts={ghosts} label="Squad so far" index={i++} />
+
+      {canRetry && (
+        <Act
+          index={i++}
+          label={`Retry level ${round} · ${lives} left`}
+          onPress={onRetry}
+          ghost={!!ghost}
+        />
+      )}
+
+      {ghost && (
+        <>
+          <Rise index={i++}>
+            <View style={styles.stepRow}>
+              <Text style={styles.step}>
+                {final ? "One last boon" : nextIsBoss ? `Deathmatch · level ${next}` : `Level ${next}`}
+              </Text>
+              <View style={styles.hair} />
+            </View>
+            <Text style={styles.stepSub}>Permanent. Your ditto keeps it too.</Text>
+          </Rise>
+          {pick.map((b) => {
+            const have = build[b.id] || 0;
+            return (
+              <Card key={b.id} index={i++} onPress={() => onAdvance(b)}>
+                <View style={[styles.dot, { backgroundColor: `hsl(${b.hue},72%,64%)` }]} />
+                <View style={styles.cardText}>
+                  <Text style={styles.cardTitle}>{b.name}{have ? ` \u00d7${have + 1}` : ""}</Text>
+                  <Text style={styles.cardSub}>
+                    <Text style={{ color: `hsl(${b.hue},72%,70%)` }}>
+                      {Game.boonGain(b.id, build)}
+                    </Text>
+                    {"  ·  less " + b.cost}
+                  </Text>
+                </View>
+              </Card>
+            );
+          })}
+        </>
+      )}
+
     </Screen>
   );
 }
@@ -323,6 +347,7 @@ export function FinishScreen({ round, won, ghosts, popped, standing, onAgain }: 
   round: number; won: boolean; ghosts: Ghost[];
   popped: number; standing: number; onAgain: () => void;
 }) {
+  // Reaching this screen without a win means the last life is gone.
   return (
     <Screen
       eyebrow={`Level ${round} of ${MAX_ROUNDS} · ${popped} popped this run`}
@@ -332,7 +357,7 @@ export function FinishScreen({ round, won, ghosts, popped, standing, onAgain }: 
       <Body index={1}>
         {won
           ? `All **${MAX_ROUNDS} levels**, and **${ghosts.length} dittos** behind you. Every wave any of you ever fought came back at once, and every one of them is gone.`
-          : `Level **${round}** outlasted your whole team, with **${standing}** still standing.`}
+          : `Level **${round}** outlasted your whole team, with **${standing}** still standing — and that was the last life.`}
       </Body>
       <Squad ghosts={ghosts} label="Your squad" index={2} />
       <Act label="Play again" onPress={onAgain} index={3} />
@@ -348,8 +373,8 @@ const styles = StyleSheet.create({
   },
   bubble: { position: "absolute", borderWidth: 1, borderColor: "#8FD9FF", top: 0 },
   eyebrow: {
-    fontFamily: F.mono, fontSize: 10, letterSpacing: 1.6, color: T.mute,
-    textTransform: "uppercase", marginBottom: 8,
+    fontFamily: F.mono, fontSize: 10, letterSpacing: 1.4, color: T.mute,
+    textTransform: "uppercase", marginBottom: 8, paddingRight: 44,
   },
   title: {
     fontFamily: F.display, fontWeight: "900", fontSize: 38, lineHeight: 41,
@@ -383,6 +408,7 @@ const styles = StyleSheet.create({
   rule: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
   ruleDot: { width: 9, height: 9, borderRadius: 5, marginTop: 6 },
   ruleText: { flex: 1, fontFamily: F.body, fontSize: 14, lineHeight: 20, color: T.mute },
+  ruleDash: { color: T.line },
   note: {
     fontFamily: F.body, fontSize: 13, lineHeight: 19, color: T.mute,
     borderLeftWidth: 2, borderLeftColor: T.line, paddingLeft: 12, marginVertical: 4,
@@ -397,4 +423,33 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   actGhostLabel: { color: T.mute },
+  // Leaving the run is a way out, not a thing to weigh against the boons, so it sits
+  // in the corner where the mute button does rather than under the choice.
+  corner: {
+    position: "absolute", top: 46, right: 18,
+    width: 36, height: 36, borderRadius: 18,
+    borderWidth: 1, borderColor: T.line,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: T.ink,
+  },
+  cornerGlyph: { fontFamily: F.mono, fontSize: 16, color: T.mute, lineHeight: 20 },
+
+  facts: { flexDirection: "row", gap: 26, marginVertical: 10 },
+  fact: { alignItems: "flex-start" },
+  factN: {
+    fontFamily: F.display, fontWeight: "900", fontSize: 26, color: T.chalk,
+    fontVariant: ["tabular-nums"], lineHeight: 29,
+  },
+  factL: {
+    fontFamily: F.mono, fontSize: 9, letterSpacing: 1.4, color: T.mute,
+    textTransform: "uppercase", marginTop: 3,
+  },
+
+  stepRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 16 },
+  step: {
+    fontFamily: F.mono, fontSize: 10, letterSpacing: 1.6, color: T.mute,
+    textTransform: "uppercase",
+  },
+  hair: { flex: 1, height: 1, backgroundColor: T.line },
+  stepSub: { fontFamily: F.body, fontSize: 13, lineHeight: 19, color: T.mute, marginTop: 5 },
 });

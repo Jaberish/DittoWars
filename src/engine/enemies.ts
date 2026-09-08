@@ -44,7 +44,7 @@ export interface EType {
 export const ETYPES: Record<string, EType> = {
   basic:  { at:1,  r:13, hp:1.0,  sp:0.95, dmg:1, hue:4,   sat:86, shape:"circle" },
   drift:  { at:2,  r:13, hp:1.0,  sp:1.00, dmg:1, hue:16,  sat:90, shape:"circle",  jump:1 },
-  mote:   { at:3,  r:8,  hp:0.28, sp:1.55, dmg:1, hue:32,  sat:92, shape:"circle" },
+  mote:   { at:3,  r:11, hp:0.28, sp:1.55, dmg:1, hue:32,  sat:92, shape:"circle" },
   lance:  { at:4,  r:14, hp:0.9,  sp:0.55, dmg:2, hue:20,  sat:95, shape:"arrow",   charge:{cd:2.6,t:0.5,mul:4.6} },
   husk:   { at:5,  r:21, hp:4.2,  sp:0.62, dmg:2, hue:350, sat:62, shape:"hex",     jump:1 },
   orbit:  { at:6,  r:15, hp:1.9,  sp:1.05, dmg:1, hue:315, sat:74, shape:"circle",  orbitR:210 },
@@ -54,7 +54,7 @@ export const ETYPES: Record<string, EType> = {
   colos:  { at:10, r:50, hp:9,    sp:0.30, dmg:3, hue:0,   sat:52, shape:"circle",  boss:1, spawns:{t:"mote",cd:2.5,max:10} },
   spit:   { at:11, r:16, hp:1.3,  sp:0.58, dmg:1, hue:265, sat:80, shape:"circle",  hold:270, shoot:{cd:2.2,n:1,sp:210,dmg:2} },
   brood:  { at:12, r:22, hp:2.2,  sp:0.70, dmg:1, hue:50,  sat:88, shape:"lobes",   splits:{t:"spore",n:20} },
-  spore:  { at:999,r:5,  hp:0.10, sp:1.70, dmg:1, hue:44,  sat:96, shape:"circle",  minion:1 },
+  spore:  { at:999,r:8,  hp:0.10, sp:1.70, dmg:1, hue:44,  sat:96, shape:"circle",  minion:1 },
   shard:  { at:13, r:12, hp:0.7,  sp:1.30, dmg:1, hue:330, sat:90, shape:"diamond", jump:1, splits:{t:"mote",n:2} },
   weave:  { at:16, r:14, hp:1.1,  sp:1.15, dmg:1, hue:45,  sat:90, shape:"diamond", zig:26 },
   ward:   { at:19, r:18, hp:2.4,  sp:0.60, dmg:1, hue:300, sat:60, shape:"oct",     shield:0.55 },

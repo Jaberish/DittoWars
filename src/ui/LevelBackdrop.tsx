@@ -46,12 +46,11 @@ export function LevelBackdrop({ round, boss, final, vw, vh }: Props) {
   const grow = useSharedValue(1.34);
   const rise = useSharedValue(26);
   const kern = useSharedValue(2);
-  const rule = useSharedValue(0);
 
   useEffect(() => {
     const hold = INTRO_HOLD * 1000;
     const lift = INTRO_LIFT * 1000;
-    fade.value = 0; grow.value = 1.34; rise.value = 26; kern.value = 2; rule.value = 0;
+    fade.value = 0; grow.value = 1.34; rise.value = 26; kern.value = 2;
     fade.value = withSequence(
       withTiming(1, { duration: 300, easing: OUT }),
       withDelay(hold - 300, withTiming(0, { duration: lift * 0.82, easing: IN })),
@@ -66,11 +65,7 @@ export function LevelBackdrop({ round, boss, final, vw, vh }: Props) {
     );
     // the kicker keeps drifting wider the whole time, so the card never sits still
     kern.value = withTiming(10, { duration: hold + lift, easing: Easing.out(Easing.quad) });
-    rule.value = withSequence(
-      withDelay(180, withTiming(1, { duration: 620, easing: OUT })),
-      withDelay(hold - 800, withTiming(0, { duration: lift * 0.7, easing: IN })),
-    );
-  }, [round, fade, grow, rise, kern, rule]);
+  }, [round, fade, grow, rise, kern]);
 
   const numeral = useAnimatedStyle(() => ({
     opacity: fade.value * 0.5,
@@ -80,10 +75,6 @@ export function LevelBackdrop({ round, boss, final, vw, vh }: Props) {
     opacity: fade.value,
     letterSpacing: kern.value,
     transform: [{ translateY: rise.value * 0.5 }],
-  }));
-  const ruleStyle = useAnimatedStyle(() => ({
-    opacity: fade.value * 0.7,
-    transform: [{ scaleX: rule.value }],
   }));
 
   const kick = final ? "The last one" : boss ? "Deathmatch" : "Level";
@@ -99,7 +90,6 @@ export function LevelBackdrop({ round, boss, final, vw, vh }: Props) {
       <Animated.Text style={[styles.kicker, { color: tint }, kicker]}>
         {kick.toUpperCase()}
       </Animated.Text>
-      <Animated.View style={[styles.rule, { backgroundColor: tint }, ruleStyle]} />
       <Animated.Text
         style={[
           styles.numeral,
@@ -111,7 +101,6 @@ export function LevelBackdrop({ round, boss, final, vw, vh }: Props) {
       >
         {round}
       </Animated.Text>
-      <Animated.View style={[styles.rule, { backgroundColor: tint }, ruleStyle]} />
       <Animated.Text style={[styles.note, kicker]}>{note}</Animated.Text>
     </View>
   );
@@ -123,7 +112,6 @@ const styles = StyleSheet.create({
     fontFamily: F.mono, fontSize: 13, fontWeight: "500",
     textTransform: "uppercase", marginBottom: 10,
   },
-  rule: { height: 1, width: "56%", opacity: 0.7 },
   numeral: {
     fontFamily: F.display, fontWeight: "900", textAlign: "center",
     fontVariant: ["tabular-nums"], includeFontPadding: false,

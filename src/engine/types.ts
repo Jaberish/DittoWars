@@ -51,6 +51,10 @@ export interface Unit {
   muzzle: number;
   dashT: number;
   dashCd: number;
+  /** seconds of immunity left from a shield pickup */
+  shield: number;
+  /** seconds of being above the floor, and so above a sweep */
+  dashInv: number;
   novaCd: number;
   lastDir: [number, number];
   evi: number;
@@ -98,6 +102,11 @@ export interface Enemy {
   wob: number;
   /** the arena scale of the wave this belongs to; every distance it uses is in it */
   sc: number;
+  /** a shove in progress: velocity that bleeds off rather than a jump in position */
+  kx: number;
+  ky: number;
+  /** the sweep that has already struck this one, so a pass hits once */
+  sweptBy?: Sweep;
   /** render-only: spawn pop-in */
   born: number;
 }
@@ -131,6 +140,30 @@ export interface EBullet {
   dmg: number;
   life: number;
   tr: number[];
+}
+
+export interface Pickup {
+  x: number;
+  y: number;
+  r: number;
+  kind: "heal" | "shield";
+  t: number;
+  life: number;
+}
+
+/** A band crossing the arena: `warn` counts down before it starts to move. */
+export interface Sweep {
+  horiz: boolean;
+  from: number;
+  to: number;
+  pos: number;
+  width: number;
+  /** the lane it covers on the far axis */
+  lo: number;
+  hi: number;
+  warn: number;
+  k: number;
+  hit: Unit[];
 }
 
 export interface Mine {
@@ -179,12 +212,15 @@ export interface Bloom {
   kind: "rapid" | "triple";
 }
 
+export const FORMS = ["ring", "line", "pincer", "arc", "wedge", "column"] as const;
+export type Form = (typeof FORMS)[number];
+
 export interface Wave {
   k: number;
   rng: () => number;
   n: number;
   sent: number;
-  form: "ring" | "line" | "pincer" | null;
+  form: Form | null;
   /** the sends at which the trickle gives way to a formation */
   formAt: number[];
   /** how many of those have already landed */
@@ -198,6 +234,8 @@ export interface RunState {
   ghosts: Ghost[];
   popped: number;
   build: Build;
+  /** retries left; a run ends when the last one is spent */
+  lives: number;
 }
 
 export interface RoundState {
@@ -215,6 +253,12 @@ export interface RoundState {
   bullets: Bullet[];
   ebul: EBullet[];
   mines: Mine[];
+  pickups: Pickup[];
+  pickRng: () => number;
+  pickNext: number;
+  sweep: Sweep | null;
+  sweepRng: () => number;
+  sweepNext: number;
   fx: Fx[];
   amb: Amb[];
   rec: { pts: number[]; events: RecEvent[] };

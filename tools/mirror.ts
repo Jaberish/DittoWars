@@ -82,9 +82,8 @@ function play(flipped: boolean) {
       }
     }
     levels.push(`${R.t.toFixed(2)}|${R.reason}|${R.popped}|${R.enemies.length}`);
-    if (g.phase === "finish") break;
-    g.acceptGhost();
-    g.phase = "boons";
+    if (g.phase === "finish" || !g.pendingGhost) break;
+    g.advance("punch");
   }
 
   Math.random = real;

@@ -13,7 +13,7 @@ import { Renderer, layoutFor } from "./render/draw";
 import { AbilityPad, Joystick, STICK_R, type Stick } from "./ui/Controls";
 import { Hud, type HudValues } from "./ui/Hud";
 import { LevelBackdrop } from "./ui/LevelBackdrop";
-import { BoonScreen, EndScreen, FinishScreen, MenuScreen } from "./ui/Overlay";
+import { EndScreen, FinishScreen, MenuScreen } from "./ui/Overlay";
 import { T, fill } from "./ui/theme";
 
 const STEP = 1 / 60;
@@ -34,7 +34,6 @@ export function GameScreen() {
 
   const hud: HudValues = {
     hp: useSharedValue(1),
-    progress: useSharedValue(1),
     pips: useSharedValue(0),
     cdDash: useSharedValue(0),
     cdPop: useSharedValue(0),
@@ -57,13 +56,6 @@ export function GameScreen() {
       }),
     [],
   );
-
-  useEffect(() => {
-    installDevtools(game, stick, () => {
-      setPipHues(game.R!.units.slice(1).map((u) => u.hue));
-      setIntro((n) => n + 1);
-    });
-  }, [game, stick]);
 
   /* ---------- input ---------- */
 
@@ -164,7 +156,10 @@ export function GameScreen() {
         if (acc > 0.5) acc = 0;
       }
 
-      const lay = layoutFor(vw, vh, R.W, R.H);
+      // the same live source the engine sizes the arena from, so the two cannot
+      // disagree about how big the screen is
+      const [lw, lh] = size.current;
+      const lay = layoutFor(lw, lh, R.W, R.H);
       const fp = renderer.floor(game, lay);
       if (fp !== lastFloor.current) { lastFloor.current = fp; floorPic.value = fp; }
       worldPic.value = renderer.world(game, lay);
@@ -172,7 +167,6 @@ export function GameScreen() {
 
       const p = R.player;
       hud.hp.value = Math.max(0, p.hp / p.max);
-      hud.progress.value = game.progress();
       hud.cdDash.value = p.dashCd / DASH_CD;
       hud.cdPop.value = p.novaCd / p.st.novaCd;
       let mask = 0;
@@ -188,7 +182,7 @@ export function GameScreen() {
 
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
-  }, [game, renderer, vw, vh, floorPic, worldPic, shake, hud]);
+  }, [game, renderer, floorPic, worldPic, shake, hud]);
 
   /* ---------- shake ---------- */
 
@@ -205,18 +199,27 @@ export function GameScreen() {
 
   /* ---------- transitions ---------- */
 
-  const start = useCallback(() => {
-    audio.init();
-    audio.play("ui");
+  /** Everything the view has to refresh once a round is on the board. */
+  const afterStart = useCallback(() => {
     // A round can end with a finger still down; without this the next one opens
     // with the player already walking.
     stick.x.value = 0;
     stick.y.value = 0;
     stick.on.value = 0;
-    game.startRound();
     setPipHues(game.R!.units.slice(1).map((u) => u.hue));
     setIntro((n) => n + 1);
   }, [game, stick]);
+
+  const start = useCallback(() => {
+    audio.init();
+    audio.play("ui");
+    game.startRound();
+    afterStart();
+  }, [game, afterStart]);
+
+  useEffect(() => {
+    installDevtools(game, stick, afterStart);
+  }, [game, stick, afterStart]);
 
   /** Pressing Start is what begins a run, and what decides which way up it plays. */
   const beginRun = useCallback(() => {
@@ -267,6 +270,7 @@ export function GameScreen() {
             kind={final ? "Final" : boss ? "Deathmatch" : "Level"}
             boss={boss}
             popped={popped}
+            lives={game.run.lives}
             pipHues={pipHues}
             muted={muted}
             onMute={() => {
@@ -286,28 +290,28 @@ export function GameScreen() {
 
       {phase === "menu" && <MenuScreen onStart={beginRun} />}
 
-      {phase === "boons" && (
-        <BoonScreen
-          round={game.run.round}
-          boss={boss}
-          final={final}
-          build={game.run.build}
-          onPick={(b: Boon) => {
-            audio.play("ui");
-            game.run.build[b.id] = (game.run.build[b.id] || 0) + 1;
-            start();
-          }}
-        />
-      )}
-
-      {phase === "end" && game.pendingGhost && (
+      {phase === "end" && (
         <EndScreen
           round={game.run.round}
           reason={game.R!.reason}
           ghost={game.pendingGhost}
           ghosts={game.run.ghosts}
           popped={game.R!.popped}
-          onNext={() => { audio.play("ui"); game.acceptGhost(); }}
+          lives={game.run.lives}
+          canRetry={game.canRetry()}
+          boss={boss}
+          final={final}
+          build={game.run.build}
+          onAdvance={(b: Boon) => {
+            audio.play("ui");
+            game.advance(b.id);
+            afterStart();
+          }}
+          onRetry={() => {
+            audio.play("ui");
+            game.retry();
+            afterStart();
+          }}
           onRestart={newRun}
         />
       )}

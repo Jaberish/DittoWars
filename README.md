@@ -6,6 +6,10 @@ recording comes back the next round as a **ditto** — a green ghost of you, fro
 the size, firepower and boons you had when it was made, fighting on your side. A
 hundred levels, in blocks of ten, each tenth an untimed deathmatch.
 
+Bubbles are thin, and three lives are the whole margin. Spending one runs a level
+again as though it never happened — which is how you avoid carrying a ditto that was
+cut off ten seconds in for the other ninety levels.
+
 React Native (Expo), rendered with Skia. Ported from a single-file HTML/Canvas
 prototype with the balance carried over unchanged.
 
@@ -78,12 +82,59 @@ drift, a line of splinters, a ring of shots — needs the half turn applied expl
 a direction computed between two mirrored points already has it. That distinction is
 what the mirror check exists to police.
 
-**One scale for the whole world.** The arena grows every round, and everything in the
+**One scale for the whole world.** The arena grows by a fixed 3.5% every round, and everything in the
 current round is multiplied by `arenaScale(level)` — you, the wave arriving now, the
 shots, the blast radii — so the game keeps the same size on screen however far the
 floor has grown. A ditto is built from *its own* level instead, which freezes it at
-the size it was: your older selves look a little smaller every round, and old waves
-are frozen the same way for the same reason.
+the size it was. Because the growth is proportional rather than a fixed number of
+units, that gap never stops widening: a ditto eighteen rounds old is 54% of your size
+at level twenty and 54% at level ninety, where a fixed step had it drifting back up to
+86% by the endgame. Old waves are frozen the same way for the same reason.
+
+**Nothing can move a ditto, so the arena moves instead.** A ditto is on rails — it
+replays a recorded path and no terrain, knockback or wall will push it anywhere. The
+only lever on where the squad stands is where *you* stood while it was recording, so
+what spreads the team out is anything that pulls you off the middle: the blooms, and
+the health and shields that sit against the wall. Walk out to a corner this level and
+next level there is a ditto in that corner.
+
+**Sweeps are the one thing a recording cannot dodge.** A band crosses part of the
+floor, announced before it moves, and takes a bite sized to finish a hurt ditto rather
+than erase a healthy one. Two ways out: walk clear of the lane — the telegraph marks
+the strip and the direction, and there is a 1.79x travel margin to leave it — or dash,
+which carries you over the band for half a second against the 0.44 it takes to pass
+over you. Nothing about a dash is recorded, so no ditto can ever do either: that is
+how the crowd thins without anything being arbitrarily deleted.
+
+**You are the only thing playing at full strength.** A ditto is a recording and hits
+like one, and one player beside eighteen of their own past selves is otherwise a
+rounding error — so the living player's shots land at double, a ghost's at 0.45. The
+player is about 4.5x the best ditto on the field and roughly a quarter of the team's
+output, where before it was 1.7x and a tenth.
+
+**Boons saturate rather than compound.** Ninety-nine picks of anything multiplicative
+runs away with the run, which is why they used to be worth 5% each and feel like
+nothing. Each stack now gives a diminishing share of a ceiling: a first Punch is +15%
+damage, a seventh +6%, and the total still lands somewhere a level can be balanced
+against. The level itself gives less than it used to, so what you picked matters more
+than how far you have come — and enemy health carries a quadratic term that pays for
+the difference.
+
+**The newest thing in a wave is the hardest.** A wave's roster runs from types you
+met in your first ten levels to the one this level just introduced, and toughness is
+scaled by how recent a type is *relative to its wave* — so a debut is always the thing
+you cannot ignore, without a level's total toughness drifting as the run goes on.
+
+**Waves are thinned to the squad that meets them.** The first ten levels are the only
+stretch fought short-handed, and a wave sized for eighteen dittos landing on four thin
+bubbles is a wall rather than a curve. The thinning stops mattering at level nineteen,
+where the squad hits its cap and stays there.
+
+**Nothing sub-pixel gets a slot in the loop.** A body that would land on screen
+smaller than two pixels is never created. The threshold is measured against the arena
+rather than the device, so a phone and a tablet field exactly the same wave — a
+screen-dependent enemy count would make difficulty depend on hardware and would break
+the guarantee that a replayed wave is the wave it was.
 
 **Traits, not subclasses.** Forty-one enemy types are rows of data with trait fields
 (`charge`, `splits`, `pull`, `phase`, `shield`, …). One behaviour pass reads them,

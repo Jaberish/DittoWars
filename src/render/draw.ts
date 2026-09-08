@@ -226,7 +226,9 @@ export class Renderer {
 
     this.ambience(canvas, R);
     this.bloom(canvas, game, R);
+    this.pickups(canvas, R);
     this.mines(canvas, R);
+    this.sweep(canvas, R);
     this.enemies(canvas, game, R);
     this.shots(canvas, R);
     this.effects(canvas, R);
@@ -292,6 +294,112 @@ export class Renderer {
       canvas.drawCircle(bl.x, bl.y, cr * 0.62, p.s(col(tint, 0.9 * fade), 3 * u));
       canvas.drawCircle(bl.x, bl.y, 3.2 * u, p.f(col(tint, 0.95 * fade)));
     }
+  }
+
+  /** Health and shields, waiting against the wall. */
+  private pickups(canvas: SkCanvas, R: RoundState) {
+    const p = this.p;
+    for (const pk of R.pickups) {
+      const heal = pk.kind === "heal";
+      const tint = heal ? C.leaf : C.film;
+      const fade = pk.t < 1.6 ? pk.t / 1.6 : 1;
+      const pulse = 0.5 + 0.5 * Math.sin(R.t * 3.4);
+      const r = pk.r;
+
+      canvas.drawCircle(pk.x, pk.y, r * (1.5 + pulse * 0.3), p.g(col(tint, 0.16 * fade), r * 0.7));
+      const ring = p.s(col(tint, 0.8 * fade), r * 0.09);
+      ring.setPathEffect(p.dashOf(6, 5, -R.t * 22));
+      canvas.drawCircle(pk.x, pk.y, r * (0.98 + pulse * 0.06), ring);
+      canvas.drawCircle(pk.x, pk.y, r * 0.56, p.f(col(C.ink, 0.85 * fade)));
+
+      // a cross for health, a chevron for a shield: two marks, no legend needed
+      const q = p.s(col(tint, 0.95 * fade), r * 0.14);
+      if (heal) {
+        canvas.drawLine(pk.x - r * 0.3, pk.y, pk.x + r * 0.3, pk.y, q);
+        canvas.drawLine(pk.x, pk.y - r * 0.3, pk.x, pk.y + r * 0.3, q);
+      } else {
+        const path = p.path2;
+        path.reset();
+        path.moveTo(pk.x - r * 0.3, pk.y - r * 0.22);
+        path.lineTo(pk.x, pk.y - r * 0.36);
+        path.lineTo(pk.x + r * 0.3, pk.y - r * 0.22);
+        path.lineTo(pk.x, pk.y + r * 0.36);
+        path.close();
+        canvas.drawPath(path, q);
+      }
+    }
+  }
+
+  /** The band, and the warning that precedes it. */
+  private sweep(canvas: SkCanvas, R: RoundState) {
+    const s = R.sweep;
+    if (!s) return;
+    const p = this.p;
+    const half = s.width * 0.5;
+    const band = (at: number, alpha: number, sigma: number) => {
+      const rect = s.horiz
+        ? Skia.XYWHRect(at - half, s.lo, s.width, s.hi - s.lo)
+        : Skia.XYWHRect(s.lo, at - half, s.hi - s.lo, s.width);
+      canvas.drawRect(rect, p.g(col(C.ember, alpha), sigma));
+    };
+    // The dangerous ground is the *lane* — the strip it will travel down — not the
+    // edge it happens to start from. Marking the lane is what makes this dodgeable:
+    // you get out of the strip, you do not outrun the band.
+    const w = R.W / 900;
+    const laneRect = s.horiz
+      ? Skia.XYWHRect(0, s.lo, R.W, s.hi - s.lo)
+      : Skia.XYWHRect(s.lo, 0, s.hi - s.lo, R.H);
+    const edges = (alpha: number, phase: number) => {
+      const q = p.s(col(C.ember, alpha), 2.6 * w);
+      q.setPathEffect(p.dashOf(26, 18, phase));
+      if (s.horiz) {
+        canvas.drawLine(0, s.lo, R.W, s.lo, q);
+        canvas.drawLine(0, s.hi, R.W, s.hi, q);
+      } else {
+        canvas.drawLine(s.lo, 0, s.lo, R.H, q);
+        canvas.drawLine(s.hi, 0, s.hi, R.H, q);
+      }
+    };
+
+    if (s.warn > 0) {
+      const k = 1 - s.warn / 1.9;
+      const pulse = 0.5 + 0.5 * Math.sin(R.t * 14);
+      canvas.drawRect(laneRect, p.g(col(C.ember, 0.05 + pulse * 0.05 + k * 0.04), 0));
+      edges(0.3 + k * 0.45, -R.t * 70);
+      // chevrons along the lane, pointing the way it will come from
+      const dir = s.to > s.from ? 1 : -1;
+      const mid = (s.lo + s.hi) * 0.5, tip = 46 * w;
+      const q = p.s(col(C.ember, (0.3 + pulse * 0.5) * k), 3.4 * w);
+      for (let i = 0; i < 5; i++) {
+        const along = (i + 0.5) / 5;
+        const a = s.horiz ? along * R.W : mid;
+        const b = s.horiz ? mid : along * R.H;
+        const path = p.path2;
+        path.reset();
+        if (s.horiz) {
+          path.moveTo(a - tip * dir, b - tip);
+          path.lineTo(a + tip * dir, b);
+          path.lineTo(a - tip * dir, b + tip);
+        } else {
+          path.moveTo(a - tip, b - tip * dir);
+          path.lineTo(a, b + tip * dir);
+          path.lineTo(a + tip, b - tip * dir);
+        }
+        canvas.drawPath(path, q);
+      }
+      band(s.from, 0.05 + pulse * 0.05, s.width * 0.3);
+      return;
+    }
+    edges(0.3, -R.t * 70);
+    band(s.pos, 0.2, s.width * 0.22);
+    // the leading edge is the part that hurts, so it is the part that glows
+    const lead = s.pos + (s.to > s.from ? half : -half);
+    const hot = p.g(col("#FFD3C4", 0.85), s.width * 0.1);
+    hot.setStyle(PaintStyle.Stroke);
+    hot.setStrokeWidth(s.width * 0.09);
+    if (s.horiz) canvas.drawLine(lead, s.lo, lead, s.hi, hot);
+    else canvas.drawLine(s.lo, lead, s.hi, lead, hot);
+    hot.setStyle(PaintStyle.Fill);
   }
 
   private mines(canvas: SkCanvas, R: RoundState) {
@@ -708,6 +816,12 @@ export class Renderer {
     const p = this.p, u = R.player;
     if (!u.alive) return;
 
+    if (u.dashInv > 0) {
+      // a shadow on the floor below, so being over the sweep reads as being over it
+      const h = Math.sin(Math.min(1, u.dashInv / 0.5) * Math.PI) * u.r * 0.9;
+      canvas.drawCircle(u.x + h * 0.3, u.y + h * 1.1, u.r * (0.85 - h / (u.r * 4)),
+        p.g(col("#000B1E", 0.4), u.r * 0.35));
+    }
     if (u.dashT > 0) {
       canvas.drawCircle(u.x, u.y, u.r * 1.8, p.g(col(C.film, 0.34), u.r * 0.8));
       // a hard streak behind, so a dash reads as a dash
@@ -736,6 +850,13 @@ export class Renderer {
     }
     if (u.hitCd > 0.45)
       canvas.drawCircle(u.x, u.y, u.r + 14 * sc, p.g(col(C.rose, 0.5), 6 * sc));
+    if (u.shield > 0) {
+      const flick = u.shield < 1.5 ? 0.45 + 0.55 * Math.abs(Math.sin(R.t * 12)) : 1;
+      canvas.drawCircle(u.x, u.y, u.r * 2.1, p.g(col(C.film, 0.22 * flick), u.r * 0.6));
+      const q = p.s(col("#BFF7EE", 0.9 * flick), 2.6 * sc);
+      q.setPathEffect(p.dashOf(9, 6, R.t * 30));
+      canvas.drawCircle(u.x, u.y, u.r * 1.7, q);
+    }
     this.gun(canvas, u, 1);
     this.bubble(canvas, u.x, u.y, u.r, 185, 1, u.vx, u.vy);
     this.hpArc(canvas, u, 1);
