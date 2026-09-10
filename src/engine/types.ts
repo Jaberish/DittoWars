@@ -2,7 +2,8 @@ import type { BoonId } from "./constants";
 
 export type Build = Partial<Record<BoonId, number>>;
 
-export type Phase = "menu" | "intro" | "playing" | "end" | "finish" | "boons";
+export type Phase =
+  | "menu" | "intro" | "playing" | "paused" | "end" | "finish" | "boons";
 
 export interface Stats {
   dmg: number;
@@ -146,7 +147,7 @@ export interface Pickup {
   x: number;
   y: number;
   r: number;
-  kind: "heal" | "shield";
+  kind: "heal" | "shield" | "life";
   t: number;
   life: number;
 }
@@ -256,6 +257,8 @@ export interface RoundState {
   pickups: Pickup[];
   pickRng: () => number;
   pickNext: number;
+  /** the spare life for this level has already been put out */
+  lifeGiven: boolean;
   sweep: Sweep | null;
   sweepRng: () => number;
   sweepNext: number;

@@ -1,18 +1,18 @@
 import {
   ARENA_BASE, ARENA_CAP, ARENA_GROWTH, BLOOM_LIFE, BLOOM_MUL, BLOOM_R, BLOOM_SEED,
-  BOMB_AT, BOMB_MAX, BOMB_SEED, BOONS, BOSS_EVERY, DASH_CD, DITTO_CAP,
-  BULLET_SP, DM_SPAWN_END, GHOST_DMG, HP_GHOST, HP_PER_LEVEL, HP_PLAYER,
-  BOON_CEIL, BOON_RATE, BOSS_HP, DASH_INV, DASH_TIME, HEAL_FRAC, INTRO_HOLD,
-  KNOCK_DECAY, LIVES,
-  PICK_CD, PICK_FROM, PICK_INSET, PICK_LIFE, PICK_R, PICK_SEED, PLAYER_EDGE,
-  MIN_PX, PLAYER_R, REF_PX, SHIELD_TIME, SWEEP_BITE, SWEEP_CD, SWEEP_CROSS,
-  SWEEP_FROM, SWEEP_LANE, SWEEP_SEED, SWEEP_WARN_LONG, SWEEP_WIDTH, cut, sat,
-  FORM_COST, SIEGE_CD, SIEGE_FROM, SIEGE_FUSE, SIEGE_OFFSET, SIEGE_R, SIEGE_SEED,
-  INTRO_LIFT, MAX_ROUNDS, MINE_DMG, MINE_FUSE, MINE_R, REC_DT, ROUND_TIME,
+  BOMB_AT, BOMB_MAX, BOMB_SEED, BOONS, BOON_CEIL, BOON_LEAD, BOON_RATE, BOSS_EVERY,
+  BOSS_HP, BULLET_SP, DASH_CD, DASH_INV, DASH_TIME, DITTO_CAP, DM_SPAWN_END, FORM_COST,
+  GHOST_DMG, HARD_FROM, HARD_SLOPE, HEAL_FRAC, HP_GHOST, HP_PER_LEVEL, HP_PLAYER,
+  INTRO_HOLD, INTRO_LIFT, KNOCK_DECAY, LIFE_EVERY, LIVES, MAX_ROUNDS, MINE_DMG,
+  MINE_FUSE, MINE_R, MIN_PX, PICK_CD, PICK_FROM, PICK_INSET, PICK_LIFE, PICK_R,
+  PICK_SEED, PLAYER_EDGE, PLAYER_R, REC_DT, REF_PX, ROUND_TIME, SHIELD_TIME, SIEGE_CD,
+  SIEGE_FROM, SIEGE_FUSE, SIEGE_OFFSET, SIEGE_R, SIEGE_SEED, SWEEP_BITE, SWEEP_CD,
+  SWEEP_CROSS, SWEEP_FROM, SWEEP_LANE, SWEEP_SEED, SWEEP_WARN_LONG, SWEEP_WIDTH, cut,
+  sat,
 } from "./constants";
 import { ETYPES, blockTypes, bossFor, newestTypeAt } from "./enemies";
 import { mkRng } from "./rng";
-import type { BoonId } from "./constants";
+import type { Boon, BoonId } from "./constants";
 import {
   FORMS,
   type Build, type Bullet, type Enemy, type Ghost, type Phase, type RoundState,
@@ -37,6 +37,7 @@ export class Game {
   run: RunState = { round: 1, ghosts: [], popped: 0, build: {}, lives: LIVES };
   R: RoundState | null = null;
   phase: Phase = "menu";
+  private resumeTo: Phase = "playing";
   pendingGhost: Ghost | null = null;
   /**
    * Play this run upside down.
@@ -87,6 +88,26 @@ export class Game {
   setPhase(p: Phase) {
     this.phase = p;
     this.hooks.onPhase(p);
+  }
+
+  /**
+   * A pause stops the clock rather than the world.
+   *
+   * The loop only steps on `intro` and `playing`, so leaving the phase means nothing
+   * moves and `R.t` — the stamp on every recorded event — stands still, which leaves
+   * the replay with no idea it was ever held. Resuming returns to whichever of the
+   * two it interrupted, so a pause during the intro does not skip it.
+   */
+  pause() {
+    if (this.phase !== "playing" && this.phase !== "intro") return false;
+    this.resumeTo = this.phase;
+    this.setPhase("paused");
+    return true;
+  }
+
+  resume() {
+    if (this.phase !== "paused") return;
+    this.setPhase(this.resumeTo);
   }
 
   newRun() {
@@ -171,6 +192,39 @@ export class Game {
     }
   }
 
+  /**
+   * What a pick takes, in the same terms as what it gives.
+   *
+   * Read off `stats` rather than restated, so the number on the card is the trade the
+   * game actually makes. "Slightly slower shots" was true of three boons at once,
+   * which read as a copy-paste rather than a cost.
+   */
+  static boonCost(id: BoonId, b: Build): string {
+    const bumped: Build = { ...b };
+    bumped[id] = (b[id] || 0) + 1;
+    const now = Game.stats(1, b), next = Game.stats(1, bumped);
+    // level scales both terms, so the ratios are the same at any level
+    const drops: [number, string][] = [
+      [next.dmg / now.dmg - 1, "damage"],
+      [now.cool / next.cool - 1, "fire rate"],
+    ];
+    drops.sort((x, y) => x[0] - y[0]);
+    const [d, what] = drops[0];
+    return `−${Math.max(1, Math.round(-d * 100))}% ${what}`;
+  }
+
+  /**
+   * The boons worth offering. One cannot get more than a few stacks ahead of your
+   * weakest, so "damage again" stops being an option long before it stops being
+   * tempting — and a run has a shape rather than a single number going up.
+   */
+  static offerable(b: Build): Boon[] {
+    let low = Infinity;
+    for (const boon of BOONS) low = Math.min(low, b[boon.id] || 0);
+    const open = BOONS.filter((boon) => (b[boon.id] || 0) <= low + BOON_LEAD);
+    return open.length ? open : BOONS.slice();
+  }
+
   static buildLabel(b: Build) {
     const out: string[] = [];
     for (const boon of BOONS) {
@@ -250,6 +304,7 @@ export class Game {
       t: 0, over: false, reason: "", shake: 0, hitStop: 0, hurtFlash: 0,
       units: [], enemies: [], bullets: [], ebul: [], mines: [], fx: [], amb: [],
       pickups: [], pickRng: mkRng(PICK_SEED + this.bloomBlock() * 6151), pickNext: 6,
+      lifeGiven: false,
       sweep: null, sweepRng: mkRng(SWEEP_SEED + this.bloomBlock() * 2749),
       sweepNext: SWEEP_CD * 0.6,
       rec: { pts: [], events: [] }, recAcc: 0,
@@ -472,7 +527,11 @@ export class Game {
     // The quadratic term pays for the boons. A saturating build front-loads its
     // power, so by the late levels a team is carrying more than a linear curve was
     // written for; this is the difference, and it keeps shots-to-kill flat.
-    const wave = 3 + (k - 1) * 0.7 + (k - 1) * (k - 1) * 0.006;
+    let wave = 3 + (k - 1) * 0.7 + (k - 1) * (k - 1) * 0.006;
+    // Bosses are excused the late-game slope: they already carry their own multiplier,
+    // and stacking both turned the last fight into a three-minute grind rather than a
+    // hard one. The slope exists to keep ordinary enemies level with a growing squad.
+    if (k > HARD_FROM && !t.boss) wave *= 1 + (k - HARD_FROM) * HARD_SLOPE;
     let hp = wave * t.hp * debut;
     // A full squad melts a boss in seconds otherwise: eighteen dittos and a player at
     // double strength put out more damage than any single body was written for.
@@ -979,10 +1038,14 @@ export class Game {
         else if (side === 2) { x = inx; y = R.H * u; }
         else { x = R.W - inx; y = R.H * u; }
         const [px, py] = this.place(x, y);
+        // Every thirtieth level puts a spare life out, once, before anything else.
+        const spare = this.run.round % LIFE_EVERY === 0 && !R.lifeGiven;
+        if (spare) R.lifeGiven = true;
         R.pickups.push({
           x: px, y: py, r: PICK_R * this.roundScale(),
-          kind: rng() < 0.5 ? "shield" : "heal",
-          t: PICK_LIFE, life: PICK_LIFE,
+          kind: spare ? "life" : rng() < 0.5 ? "shield" : "heal",
+          t: spare ? PICK_LIFE * 1.8 : PICK_LIFE,
+          life: spare ? PICK_LIFE * 1.8 : PICK_LIFE,
         });
       }
     }
@@ -997,10 +1060,12 @@ export class Game {
       if ((p.x - pk.x) * (p.x - pk.x) + (p.y - pk.y) * (p.y - pk.y) > rr * rr) continue;
       R.pickups.splice(i, 1);
       if (pk.kind === "heal") p.hp = Math.min(p.max, p.hp + p.max * HEAL_FRAC);
-      else p.shield = SHIELD_TIME;
+      else if (pk.kind === "shield") p.shield = SHIELD_TIME;
+      else this.run.lives++;
       R.fx.push({
         x: pk.x, y: pk.y, t: 0, life: 0.5, rad: pk.r * 2.6,
-        hue: pk.kind === "heal" ? 140 : 185, ring: true, width: 5,
+        hue: pk.kind === "heal" ? 140 : pk.kind === "life" ? 340 : 185,
+        ring: true, width: 5,
       });
       this.hooks.sfx("bloom");
       this.hooks.haptic("medium");

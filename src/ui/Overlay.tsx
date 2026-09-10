@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Animated, {
   Easing, useAnimatedStyle, useSharedValue, withDelay, withRepeat, withSequence,
@@ -7,7 +7,11 @@ import Animated, {
 import { BOONS, DITTO_CAP, MAX_ROUNDS, type Boon } from "../engine/constants";
 import type { Ghost } from "../engine/types";
 import { Game } from "../engine/world";
+import { getBest, loadBest, type Best } from "../highscore";
+import { EnemyGallery } from "./EnemyGallery";
+import { MenuDiagram } from "./MenuDiagram";
 import { F, T, fill } from "./theme";
+import { BoonIcon, MenuIcon, SoundIcon } from "./Icon";
 
 const OUT = Easing.bezier(0.16, 1, 0.3, 1);
 
@@ -88,8 +92,45 @@ function Card({ children, onPress, index }: {
   );
 }
 
-function Act({ label, onPress, ghost, index }: {
-  label: string; onPress: () => void; ghost?: boolean; index: number;
+/**
+ * One boon, said plainly: what it does, what it costs, and the number this pick is
+ * actually worth. Compact enough that three of them sit in thumb reach at the bottom
+ * of the screen, which is where a choice you make every single level belongs.
+ */
+function BoonRow({ boon, have, gain, cost, onPress }: {
+  boon: Boon; have: number; gain: string; cost: string; onPress: () => void;
+}) {
+  const press = useSharedValue(0);
+  const s = useAnimatedStyle(() => ({ transform: [{ scale: 1 - press.value * 0.02 }] }));
+  const tint = `hsl(${boon.hue},72%,66%)`;
+  return (
+    <Pressable
+      onPressIn={() => { press.value = withSpring(1, { damping: 16, stiffness: 400 }); }}
+      onPressOut={() => { press.value = withSpring(0); }}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${boon.name}. ${boon.desc}. ${gain}, ${cost}`}
+    >
+      <Animated.View style={[styles.boon, s]}>
+        <BoonIcon id={boon.id} tint={tint} size={24} />
+        <View style={styles.boonText}>
+          <Text style={styles.boonName}>
+            {boon.desc}
+            {have ? <Text style={styles.boonHave}>{`  ${boon.name} ×${have + 1}`}</Text> : null}
+          </Text>
+        </View>
+        {/* what it gives over what it takes, stacked, so the trade reads as one thing */}
+        <View style={styles.boonTrade}>
+          <Text style={[styles.boonGain, { color: tint }]}>{gain}</Text>
+          <Text style={styles.boonCost}>{cost}</Text>
+        </View>
+      </Animated.View>
+    </Pressable>
+  );
+}
+
+function Act({ label, onPress, ghost, index, big }: {
+  label: string; onPress: () => void; ghost?: boolean; index: number; big?: boolean;
 }) {
   const press = useSharedValue(0);
   const s = useAnimatedStyle(() => ({ transform: [{ scale: 1 - press.value * 0.03 }] }));
@@ -101,17 +142,19 @@ function Act({ label, onPress, ghost, index }: {
         onPress={onPress}
         accessibilityRole="button"
       >
-        <Animated.View style={[styles.act, ghost && styles.actGhost, s]}>
-          <Text style={[styles.actLabel, ghost && styles.actGhostLabel]}>{label}</Text>
+        <Animated.View style={[styles.act, big && styles.actBig, ghost && styles.actGhost, s]}>
+          <Text style={[styles.actLabel, big && styles.actBigLabel, ghost && styles.actGhostLabel]}>
+            {label}
+          </Text>
         </Animated.View>
       </Pressable>
     </Rise>
   );
 }
 
-function Screen({ eyebrow, title, children, gold, onRestart }: {
+function Screen({ eyebrow, title, children, footer, gold, onRestart }: {
   eyebrow: string; title: string; children: React.ReactNode;
-  gold?: boolean; onRestart?: () => void;
+  footer?: React.ReactNode; gold?: boolean; onRestart?: () => void;
 }) {
   const k = useSharedValue(0);
   useEffect(() => { k.value = withTiming(1, { duration: 320, easing: OUT }); }, [k]);
@@ -134,6 +177,7 @@ function Screen({ eyebrow, title, children, gold, onRestart }: {
         </Animated.View>
         {children}
       </ScrollView>
+      {footer}
       {onRestart && (
         <Pressable
           onPress={onRestart}
@@ -141,7 +185,7 @@ function Screen({ eyebrow, title, children, gold, onRestart }: {
           accessibilityLabel="Menu"
           style={styles.corner}
         >
-          <Text style={styles.cornerGlyph}>☰</Text>
+          <MenuIcon size={17} tint={T.mute} />
         </Pressable>
       )}
     </Animated.View>
@@ -167,7 +211,7 @@ function GhostCard({ g, fresh, index }: { g: Ghost; fresh?: boolean; index: numb
     <Card index={index}>
       <View style={[styles.dot, { backgroundColor: `hsl(${g.hue},58%,64%)` }]} />
       <View style={styles.cardText}>
-        <Text style={styles.cardTitle}>{fresh ? "New ditto" : `Ditto ${g.round}`}</Text>
+        <Text style={styles.cardTitle}>{fresh ? "New replay" : `Replay ${g.round}`}</Text>
         <Text style={styles.cardSub} numberOfLines={1}>
           {g.full ? "" : "cut short · "}{Game.buildLabel(g.build)}
         </Text>
@@ -203,43 +247,164 @@ function Squad({ ghosts, label, index }: { ghosts: Ghost[]; label: string; index
 /* ================= screens ================= */
 
 export function MenuScreen({ onStart }: { onStart: () => void }) {
+  // Read from the device, which lands a tick after the menu first paints — so it has
+  // to be state, not a plain read, or the best run never shows on a cold start.
+  const [best, setBest] = useState<Best>({ score: 0, level: 0 });
+  useEffect(() => {
+    let live = true;
+    loadBest().then((b) => { if (live) setBest(b); });
+    return () => { live = false; };
+  }, []);
   return (
-    <Screen eyebrow="Arena shooter" title="Ditto Wars">
-      <Body index={1}>Your past selves fight beside you.</Body>
-      <Rise index={2} style={styles.rules}>
-        <Rule tint={T.film} title="You">Move. The gun aims itself.</Rule>
-        <Rule tint={T.leaf} title="Dittos">
-          Every round is recorded and replays on your side, for the rest of the run.
-        </Rule>
-        <Rule tint={T.ember} title="Waves">
-          Each level adds its wave. Every tenth is a deathmatch.
-        </Rule>
-      </Rise>
-      <Rise index={3}>
-        <View style={styles.facts}>
-          {[["100", "levels"], ["3", "lives"], ["41", "enemies"]].map(([n, l]) => (
-            <View key={l} style={styles.fact}>
-              <Text style={styles.factN}>{n}</Text>
-              <Text style={styles.factL}>{l}</Text>
+    <Screen
+      eyebrow="Arena bubble shooter"
+      title="Ditto Wars"
+      footer={
+        <View style={styles.startBar}>
+          {best.score > 0 && (
+            <View style={styles.best}>
+              <Text style={styles.bestK}>Best</Text>
+              <Text style={styles.bestV}>{best.score.toLocaleString()}</Text>
+              <View style={styles.bestGap} />
+              <Text style={styles.bestK}>Reached</Text>
+              <Text style={styles.bestV}>Level {best.level}</Text>
             </View>
-          ))}
+          )}
+          <Act label="Start game" onPress={onStart} index={0} big />
+        </View>
+      }
+    >
+      <Body index={1}>Your past selves fight beside you.</Body>
+      <Rise index={2}><MenuDiagram /></Rise>
+      <Rise index={3} style={styles.rules}>
+        <Rule tint={T.leaf} title="Your replays play on your side" />
+      </Rise>
+      <Rise index={4}>
+        <View style={styles.moves}>
+          <Move tint={T.gold} glyph="◎" name="Pop" note="Blast everything near you" />
+          <Move tint={T.film} glyph="≫" name="Dash" note="Make a quick dash" />
         </View>
       </Rise>
-      <Act label="Start run" onPress={onStart} index={4} />
     </Screen>
   );
 }
 
-function Rule({ tint, title, children }: { tint: string; title: string; children: string }) {
+/** One of the two things you actually press, shown as the button it will be. */
+function Move({ tint, glyph, name, note }: {
+  tint: string; glyph: string; name: string; note: string;
+}) {
+  return (
+    <View style={styles.move}>
+      <View style={[styles.moveBtn, { borderColor: tint }]}>
+        <Text style={[styles.moveGlyph, { color: tint }]}>{glyph}</Text>
+      </View>
+      <View style={styles.moveText}>
+        <Text style={styles.moveName}>{name}</Text>
+        <Text style={styles.moveNote}>{note}</Text>
+      </View>
+    </View>
+  );
+}
+
+function Rule({ tint, title, children }: {
+  tint: string; title: string; children?: string;
+}) {
   return (
     <View style={styles.rule}>
       <View style={[styles.ruleDot, { backgroundColor: tint }]} />
       <Text style={styles.ruleText}>
         <Text style={styles.strong}>{title}</Text>
-        <Text style={styles.ruleDash}> — </Text>
+        {children ? <Text style={styles.ruleDash}> — </Text> : null}
         {children}
       </Text>
     </View>
+  );
+}
+
+/**
+ * The one setting the game has. It used to sit in the corner of the arena, where it
+ * was a permanent button for something you press about twice; behind the pause it
+ * costs one extra tap and stops competing with the score for the top of the screen.
+ */
+function SoundRow({ muted, onPress, index }: {
+  muted: boolean; onPress: () => void; index: number;
+}) {
+  const press = useSharedValue(0);
+  const s = useAnimatedStyle(() => ({ transform: [{ scale: 1 - press.value * 0.02 }] }));
+  const tint = muted ? T.mute : T.film;
+  return (
+    <Rise index={index}>
+      <Pressable
+        onPressIn={() => { press.value = withSpring(1, { damping: 16, stiffness: 400 }); }}
+        onPressOut={() => { press.value = withSpring(0); }}
+        onPress={onPress}
+        accessibilityRole="switch"
+        accessibilityState={{ checked: !muted }}
+        accessibilityLabel="Sound"
+      >
+        <Animated.View style={[styles.card, s]}>
+          <SoundIcon size={22} tint={tint} off={muted} />
+          <View style={styles.cardText}>
+            <Text style={styles.cardTitle}>Sound</Text>
+            <Text style={styles.cardSub}>Effects and vibration</Text>
+          </View>
+          <View style={[styles.pill, !muted && { borderColor: T.film }]}>
+            <Text style={[styles.pillText, !muted && { color: T.film }]}>
+              {muted ? "Off" : "On"}
+            </Text>
+          </View>
+        </Animated.View>
+      </Pressable>
+    </Rise>
+  );
+}
+
+/**
+ * The round, held.
+ *
+ * Reached from the arena's one button, and the only screen that interrupts a level
+ * rather than following one — so Resume is the big target and leaving is the quiet
+ * one, which is the opposite weighting to every other screen here.
+ */
+export function PauseScreen({ round, score, muted, onMute, onResume, onQuit }: {
+  round: number; score: number; muted: boolean;
+  onMute: () => void; onResume: () => void; onQuit: () => void;
+}) {
+  // Already loaded by the time a round is running, but a pause can also be the first
+  // thing that asks for it on a hot reload, so it is read the same way the menu does.
+  const [best, setBest] = useState<Best>(getBest());
+  useEffect(() => {
+    let live = true;
+    loadBest().then((b) => { if (live) setBest(b); });
+    return () => { live = false; };
+  }, []);
+
+  // Banked at every level end, so this is the best *completed* run — the level under
+  // way is the eyebrow's business, and conflating the two would double-count it.
+  const has = best.score > 0;
+
+  return (
+    <Screen
+      eyebrow={`Level ${round} · ${score.toLocaleString()} score`}
+      title="Paused"
+      footer={
+        <View style={styles.startBar}>
+          <Act label="Resume" onPress={onResume} index={0} big />
+        </View>
+      }
+    >
+      <Rise index={1}>
+        <View style={styles.best}>
+          <Text style={styles.bestK}>Best</Text>
+          <Text style={styles.bestV}>{has ? best.score.toLocaleString() : "—"}</Text>
+          <View style={styles.bestGap} />
+          <Text style={styles.bestK}>Reached</Text>
+          <Text style={styles.bestV}>{has ? `Level ${best.level}` : "—"}</Text>
+        </View>
+      </Rise>
+      <SoundRow muted={muted} onPress={onMute} index={2} />
+      <Act index={3} label="Quit to menu" onPress={onQuit} ghost />
+    </Screen>
   );
 }
 
@@ -267,7 +432,8 @@ export function EndScreen({
 
   // three of the five, drawn fresh for the level ahead
   const pick = useMemo(() => {
-    const pool = BOONS.slice(), out: Boon[] = [];
+    // only what you are allowed to take: no boon may run far ahead of the rest
+    const pool = Game.offerable(build), out: Boon[] = [];
     while (out.length < 3 && pool.length)
       out.push(pool.splice((Math.random() * pool.length) | 0, 1)[0]);
     return out;
@@ -276,10 +442,10 @@ export function EndScreen({
   const body = reason === "wiped"
     ? "A wipe leaves **no recording**. Spend a life and walk back in."
     : wipes
-      ? "The board is wiped — **a fresh cast** for the next ten levels. Your dittos stay."
+      ? "The board is wiped — **a fresh cast** for the next ten levels. Your replays stay."
       : ghost?.full
         ? ""
-        : "Cut short. This ditto only ever fights **part** of a level — spend a life to run it again.";
+        : "Cut short. This replay only ever fights **part** of a level — spend a life to run it again.";
 
   const title = reason === "wiped" ? "Your team was wiped out"
     : reason === "cleared" ? "Deathmatch won"
@@ -288,12 +454,32 @@ export function EndScreen({
   let i = 1;
   return (
     <Screen
-      eyebrow={`Level ${round} · ${popped} popped · ` +
-        `${Math.min(DITTO_CAP, ghosts.length + (ghost ? 1 : 0))} dittos · ` +
+      eyebrow={`Level ${round} · ${popped.toLocaleString()} score · ` +
+        `${Math.min(DITTO_CAP, ghosts.length + (ghost ? 1 : 0))} replays · ` +
         `${lives} ${lives === 1 ? "life" : "lives"}`}
       title={title}
       gold={reason === "cleared"}
       onRestart={onRestart}
+      footer={ghost ? (
+        <View style={styles.footer}>
+          <Text style={styles.step}>
+            {final ? "One last boon" : `Pick one to start level ${next}`}
+          </Text>
+          {pick.map((b) => {
+            const have = build[b.id] || 0;
+            return (
+              <BoonRow
+                key={b.id}
+                boon={b}
+                have={have}
+                gain={Game.boonGain(b.id, build)}
+                cost={Game.boonCost(b.id, build)}
+                onPress={() => onAdvance(b)}
+              />
+            );
+          })}
+        </View>
+      ) : undefined}
     >
       {!!body && <Body index={i++}>{body}</Body>}
       {ghost && <GhostCard g={ghost} fresh index={i++} />}
@@ -308,37 +494,6 @@ export function EndScreen({
         />
       )}
 
-      {ghost && (
-        <>
-          <Rise index={i++}>
-            <View style={styles.stepRow}>
-              <Text style={styles.step}>
-                {final ? "One last boon" : nextIsBoss ? `Deathmatch · level ${next}` : `Level ${next}`}
-              </Text>
-              <View style={styles.hair} />
-            </View>
-            <Text style={styles.stepSub}>Permanent. Your ditto keeps it too.</Text>
-          </Rise>
-          {pick.map((b) => {
-            const have = build[b.id] || 0;
-            return (
-              <Card key={b.id} index={i++} onPress={() => onAdvance(b)}>
-                <View style={[styles.dot, { backgroundColor: `hsl(${b.hue},72%,64%)` }]} />
-                <View style={styles.cardText}>
-                  <Text style={styles.cardTitle}>{b.name}{have ? ` \u00d7${have + 1}` : ""}</Text>
-                  <Text style={styles.cardSub}>
-                    <Text style={{ color: `hsl(${b.hue},72%,70%)` }}>
-                      {Game.boonGain(b.id, build)}
-                    </Text>
-                    {"  ·  less " + b.cost}
-                  </Text>
-                </View>
-              </Card>
-            );
-          })}
-        </>
-      )}
-
     </Screen>
   );
 }
@@ -348,19 +503,61 @@ export function FinishScreen({ round, won, ghosts, popped, standing, onAgain }: 
   popped: number; standing: number; onAgain: () => void;
 }) {
   // Reaching this screen without a win means the last life is gone.
+  if (!won) {
+    return (
+      <Screen
+        eyebrow={`Level ${round} of ${MAX_ROUNDS} · ${popped.toLocaleString()} score`}
+        title="Your team was wiped out"
+        footer={
+          <View style={styles.startBar}>
+            <Act label="Back to menu" onPress={onAgain} index={0} big />
+          </View>
+        }
+      >
+        <Body index={1}>
+          {`Level **${round}** outlasted your whole team, with **${standing}** still standing — and that was the last life.`}
+        </Body>
+        <Squad ghosts={ghosts} label="Your squad" index={2} />
+      </Screen>
+    );
+  }
+
   return (
     <Screen
-      eyebrow={`Level ${round} of ${MAX_ROUNDS} · ${popped} popped this run`}
-      title={won ? "You held the arena" : "Your team was wiped out"}
-      gold={won}
+      eyebrow="All one hundred levels"
+      title="You held the arena"
+      gold
+      footer={
+        <View style={styles.startBar}>
+          <Act label="Back to menu" onPress={onAgain} index={0} big />
+        </View>
+      }
     >
-      <Body index={1}>
-        {won
-          ? `All **${MAX_ROUNDS} levels**, and **${ghosts.length} dittos** behind you. Every wave any of you ever fought came back at once, and every one of them is gone.`
-          : `Level **${round}** outlasted your whole team, with **${standing}** still standing — and that was the last life.`}
+      <Rise index={1}>
+        <View style={styles.trophy}>
+          {[
+            [popped.toLocaleString(), "score"],
+            [String(ghosts.length), "replays"],
+            [String(MAX_ROUNDS), "levels"],
+          ].map(([n, l]) => (
+            <View key={l} style={styles.trophyCell}>
+              <Text style={styles.trophyN}>{n}</Text>
+              <Text style={styles.trophyL}>{l}</Text>
+            </View>
+          ))}
+        </View>
+      </Rise>
+      <Body index={2}>
+        The last board is clear. **Nothing left standing.**
       </Body>
-      <Squad ghosts={ghosts} label="Your squad" index={2} />
-      <Act label="Play again" onPress={onAgain} index={3} />
+      <Rise index={3}>
+        <View style={styles.stepRow}>
+          <Text style={styles.step}>Everything you beat</Text>
+          <View style={styles.hair} />
+        </View>
+      </Rise>
+      <Rise index={4}><EnemyGallery /></Rise>
+      <Squad ghosts={ghosts} label="Your squad" index={5} />
     </Screen>
   );
 }
@@ -417,7 +614,28 @@ const styles = StyleSheet.create({
     backgroundColor: T.film, borderRadius: 13, paddingVertical: 16,
     alignItems: "center", marginTop: 6,
   },
+  actBig: { paddingVertical: 20, borderRadius: 16 },
+  actBigLabel: { fontSize: 17, letterSpacing: 0.3 },
   actGhost: { backgroundColor: "transparent", borderWidth: 1, borderColor: T.line },
+
+  // The one button that starts everything, kept off the scroll and under the thumb.
+  startBar: {
+    paddingHorizontal: 22, paddingTop: 10, paddingBottom: 26,
+    borderTopWidth: 1, borderTopColor: T.line, backgroundColor: T.void,
+    maxWidth: 560, width: "100%", alignSelf: "center",
+  },
+
+  moves: { flexDirection: "row", gap: 18, marginVertical: 4 },
+  move: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10 },
+  moveBtn: {
+    width: 38, height: 38, borderRadius: 19, borderWidth: 1.5,
+    backgroundColor: T.ink2, alignItems: "center", justifyContent: "center",
+  },
+  moveGlyph: { fontFamily: F.mono, fontSize: 15, lineHeight: 18 },
+  moveText: { flex: 1 },
+  moveName: { fontFamily: F.body, fontWeight: "700", fontSize: 13, color: T.chalk },
+  moveNote: { fontFamily: F.body, fontSize: 11, lineHeight: 15, color: T.mute },
+
   actLabel: {
     fontFamily: F.body, fontWeight: "700", fontSize: 15, color: T.ink,
     letterSpacing: 0.2,
@@ -432,17 +650,64 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
     backgroundColor: T.ink,
   },
-  cornerGlyph: { fontFamily: F.mono, fontSize: 16, color: T.mute, lineHeight: 20 },
 
-  facts: { flexDirection: "row", gap: 26, marginVertical: 10 },
-  fact: { alignItems: "flex-start" },
-  factN: {
-    fontFamily: F.display, fontWeight: "900", fontSize: 26, color: T.chalk,
-    fontVariant: ["tabular-nums"], lineHeight: 29,
+  best: {
+    flexDirection: "row", alignItems: "baseline", gap: 8,
+    borderWidth: 1, borderColor: T.line, borderRadius: 12,
+    paddingVertical: 11, paddingHorizontal: 14, marginBottom: 10,
   },
-  factL: {
+  bestK: {
     fontFamily: F.mono, fontSize: 9, letterSpacing: 1.4, color: T.mute,
-    textTransform: "uppercase", marginTop: 3,
+    textTransform: "uppercase",
+  },
+  bestV: {
+    fontFamily: F.body, fontWeight: "700", fontSize: 15, color: T.gold,
+    fontVariant: ["tabular-nums"],
+  },
+  bestGap: { flex: 1 },
+
+  pill: {
+    minWidth: 48, borderWidth: 1, borderColor: T.line, borderRadius: 9,
+    paddingVertical: 5, paddingHorizontal: 10, alignItems: "center",
+  },
+  pillText: {
+    fontFamily: F.mono, fontSize: 11, letterSpacing: 1.2, color: T.mute,
+    textTransform: "uppercase",
+  },
+
+
+  // The choice you make every level, kept where a thumb already is.
+  footer: {
+    paddingHorizontal: 22, paddingTop: 12, paddingBottom: 26, gap: 8,
+    borderTopWidth: 1, borderTopColor: T.line, backgroundColor: T.void,
+    maxWidth: 560, width: "100%", alignSelf: "center",
+  },
+  boon: {
+    flexDirection: "row", alignItems: "center", gap: 11,
+    backgroundColor: T.ink2, borderRadius: 13, borderWidth: 1, borderColor: "#33415F",
+    paddingVertical: 12, paddingHorizontal: 14,
+  },
+  boonText: { flex: 1 },
+  boonTrade: { alignItems: "flex-end", gap: 2 },
+  boonName: { fontFamily: F.body, fontWeight: "700", fontSize: 15, color: T.chalk },
+  boonHave: { fontFamily: F.mono, fontSize: 11, fontWeight: "400", color: T.mute },
+  boonCost: { fontFamily: F.mono, fontSize: 11, color: T.mute, fontVariant: ["tabular-nums"] },
+  boonGain: { fontFamily: F.mono, fontSize: 12, fontVariant: ["tabular-nums"] },
+
+  trophy: {
+    flexDirection: "row", gap: 10, marginVertical: 8,
+  },
+  trophyCell: {
+    flex: 1, alignItems: "center", paddingVertical: 14,
+    borderWidth: 1, borderColor: T.line, borderRadius: 14, backgroundColor: T.ink2,
+  },
+  trophyN: {
+    fontFamily: F.display, fontWeight: "900", fontSize: 24, lineHeight: 27,
+    color: T.gold, fontVariant: ["tabular-nums"],
+  },
+  trophyL: {
+    fontFamily: F.mono, fontSize: 9, letterSpacing: 1.3, color: T.mute,
+    textTransform: "uppercase", marginTop: 4,
   },
 
   stepRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 16 },

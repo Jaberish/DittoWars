@@ -5,41 +5,22 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeArea } from "./useSafeArea";
 import { F, T } from "./theme";
+import { MenuIcon } from "./Icon";
 
 export interface HudValues {
   hp: SharedValue<number>;
-  pips: SharedValue<number>;
   cdDash: SharedValue<number>;
   cdPop: SharedValue<number>;
 }
 
 interface Props {
   v: HudValues;
-  round: number;
-  kind: string;
-  boss: boolean;
-  popped: number;
+  score: number;
   lives: number;
-  pipHues: number[];
-  muted: boolean;
-  onMute: () => void;
+  onMenu: () => void;
 }
 
-/** One ditto, lit while it is still fighting. */
-function Pip({ pips, index, hue }: { pips: SharedValue<number>; index: number; hue: number }) {
-  const style = useAnimatedStyle(() => {
-    const alive = (pips.value >> index) & 1;
-    return {
-      opacity: alive ? 1 : 0.28,
-      backgroundColor: alive ? `hsla(${hue},58%,66%,0.3)` : "transparent",
-      borderColor: alive ? `hsl(${hue},58%,66%)` : T.line,
-      transform: [{ scale: alive ? 1 : 0.78 }],
-    };
-  });
-  return <Animated.View style={[styles.pip, style]} />;
-}
-
-export function Hud({ v, round, kind, boss, popped, lives, pipHues, muted, onMute }: Props) {
+export function Hud({ v, score, lives, onMenu }: Props) {
   const inset = useSafeArea();
 
   const health = useAnimatedStyle(() => ({
@@ -51,40 +32,34 @@ export function Hud({ v, round, kind, boss, popped, lives, pipHues, muted, onMut
 
   // Deliberately not one full-screen container: a view spanning the arena
   // intercepts the drag that steers, whatever its pointerEvents says. Each piece
-  // is placed on its own and marked inert, and only the mute button takes touches.
+  // is placed on its own and marked inert, and only the menu button takes touches.
   return (
     <>
       <View style={[styles.top, { paddingTop: inset.top + 14 }]}>
-        <View>
-          <Text style={styles.k}>{kind}</Text>
-          <Text style={[styles.v, boss && { color: T.gold }]}>{round}</Text>
-          <View style={styles.lives}>
-            {[0, 1, 2].map((n) => (
-              <View key={n} style={[styles.life, n >= lives && styles.lifeSpent]} />
-            ))}
-          </View>
-          <View style={styles.pips}>
-            {pipHues.map((hue, i) => (
-              <Pip key={i} pips={v.pips} index={i} hue={hue} />
-            ))}
-          </View>
+        <View style={styles.lives}>
+          {Array.from({ length: Math.max(3, lives) }, (_, n) => (
+            <Text key={n} style={[styles.life, n >= lives && styles.lifeSpent]}>
+              ♥
+            </Text>
+          ))}
         </View>
 
+        {/* one line rather than a stack: the figure earns the height more than the
+            word above it does */}
         <View style={styles.right}>
-          <Text style={[styles.k, styles.rightText]}>Popped</Text>
-          <Text style={[styles.v, styles.rightText]}>{popped}</Text>
+          <Text style={styles.k}>Score</Text>
+          <Text style={styles.v}>{score.toLocaleString()}</Text>
         </View>
       </View>
 
       <Pressable
-        onPress={onMute}
+        onPress={onMenu}
         hitSlop={10}
-        accessibilityLabel={muted ? "Unmute sound" : "Mute sound"}
-        style={[styles.mute, { top: inset.top + 12 }]}
+        accessibilityRole="button"
+        accessibilityLabel="Pause and open menu"
+        style={[styles.menu, { top: inset.top + 12 }]}
       >
-        <Text style={[styles.muteGlyph, { color: muted ? T.mute : T.film }]}>
-          {muted ? "✕" : "♪"}
-        </Text>
+        <MenuIcon size={17} tint={T.mute} />
       </Pressable>
 
       <View style={[styles.hpTrack, { bottom: inset.bottom + 14 }]}>
@@ -97,30 +72,25 @@ export function Hud({ v, round, kind, boss, popped, lives, pipHues, muted, onMut
 const styles = StyleSheet.create({
   top: {
     position: "absolute", top: 0, left: 0, right: 0,
-    flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start",
+    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
     paddingHorizontal: 16, paddingRight: 58, pointerEvents: "none",
   },
   k: { fontFamily: F.mono, fontSize: 10, letterSpacing: 1.6, color: T.mute, textTransform: "uppercase" },
   v: {
     fontFamily: F.display, fontWeight: "900", fontSize: 30, lineHeight: 33,
-    color: T.chalk, fontVariant: ["tabular-nums"], marginTop: 3,
+    color: T.chalk, fontVariant: ["tabular-nums"],
   },
-  right: { alignItems: "flex-end" },
-  rightText: { textAlign: "right" },
-  // Diamonds, not circles: retries are yours, the circles below are the squad's.
-  lives: { flexDirection: "row", gap: 6, marginTop: 9, paddingLeft: 2 },
-  life: {
-    width: 8, height: 8, backgroundColor: T.rose,
-    transform: [{ rotate: "45deg" }],
-  },
-  lifeSpent: { backgroundColor: "transparent", borderWidth: 1, borderColor: T.line },
-  pips: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 10, maxWidth: 154 },
-  pip: { width: 11, height: 11, borderRadius: 6, borderWidth: 1.5 },
-  mute: {
+  right: { flexDirection: "row", alignItems: "baseline", gap: 8 },
+  // Off the screen edge by the same 16 as everything else, then off the arena's
+  // outline by this: the hearts alone move, the gutter they sit in does not.
+  lives: { flexDirection: "row", gap: 5, marginLeft: 12 },
+  life: { fontSize: 15, lineHeight: 18, color: T.rose },
+  lifeSpent: { color: T.line },
+  menu: {
     position: "absolute", right: 14, width: 34, height: 34, borderRadius: 17,
-    borderWidth: 1, borderColor: T.line, alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderColor: T.line, backgroundColor: T.ink,
+    alignItems: "center", justifyContent: "center",
   },
-  muteGlyph: { fontFamily: F.mono, fontSize: 14 },
   hpTrack: {
     position: "absolute", left: 16, right: 16, height: 5, borderRadius: 99,
     backgroundColor: T.ink3, overflow: "hidden", pointerEvents: "none",

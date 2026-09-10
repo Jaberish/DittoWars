@@ -1,5 +1,5 @@
 import { Game } from "../src/engine/world";
-import { BOONS, ROUND_TIME } from "../src/engine/constants";
+import { ROUND_TIME } from "../src/engine/constants";
 
 const g = new Game({ sfx: () => {}, haptic: () => {}, onPhase: () => {} });
 g.setViewport(() => [390, 780]);
@@ -98,8 +98,9 @@ for (let lv = 1; lv <= LEVELS; lv++) {
     lv--;
     continue;
   }
-  // take a boon like a player would, and step into the next level with it
-  g.advance(BOONS[(lv * 3) % BOONS.length].id);
+  // take a boon the way the screen would offer it: only what the lead cap allows
+  const offered = Game.offerable(g.run.build);
+  g.advance(offered[(lv * 3) % offered.length].id);
 }
 console.log(`\npeak field = ${peakField}  frames = ${totalFrames}  attempts = ${attempts}` +
   `  lives left = ${g.run.lives}  build = ${Game.buildLabel(g.run.build)}`);

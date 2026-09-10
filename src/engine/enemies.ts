@@ -3,7 +3,9 @@ import { mkRng } from "./rng";
 
 export type Shape =
   | "circle" | "arrow" | "hex" | "lobes" | "pent" | "diamond"
-  | "oct" | "star" | "ring" | "tri" | "square";
+  | "oct" | "star" | "ring" | "tri" | "square"
+  // the late roster: past level thirty-five every type gets a silhouette of its own
+  | "trefoil" | "petal" | "crescent" | "spike" | "gear" | "eye" | "bar" | "drop";
 
 export interface EType {
   at: number;
@@ -63,26 +65,26 @@ export const ETYPES: Record<string, EType> = {
   hulk:   { at:28, r:26, hp:6.0,  sp:0.50, dmg:3, hue:355, sat:58, shape:"hex",     jump:1, shield:0.8 },
   swarm:  { at:31, r:14, hp:1.2,  sp:0.95, dmg:1, hue:40,  sat:88, shape:"circle",  spawns:{t:"mote",cd:3.2,max:6} },
   lash:   { at:34, r:15, hp:1.0,  sp:0.60, dmg:2, hue:15,  sat:95, shape:"arrow",   charge:{cd:2.2,t:0.75,mul:5.2} },
-  glob:   { at:37, r:22, hp:2.4,  sp:0.60, dmg:1, hue:300, sat:76, shape:"lobes",   explode:{r:130,dmg:3}, splits:{t:"mote",n:3} },
+  glob:   { at:37, r:22, hp:2.4,  sp:0.60, dmg:1, hue:300, sat:76, shape:"trefoil",   explode:{r:130,dmg:3}, splits:{t:"mote",n:3} },
   siren:  { at:40, r:20, hp:2.0,  sp:0.55, dmg:1, hue:55,  sat:85, shape:"ring",    slow:{r:260,mul:0.55} },
   pike:   { at:43, r:16, hp:1.2,  sp:0.62, dmg:2, hue:25,  sat:92, shape:"tri",     charge:{cd:2.8,t:0.45,mul:4.2}, shoot:{cd:3.4,n:1,sp:230,dmg:2} },
-  mendr:  { at:46, r:19, hp:3.0,  sp:0.72, dmg:1, hue:345, sat:70, shape:"pent",    regen:0.9 },
+  mendr:  { at:46, r:19, hp:3.0,  sp:0.72, dmg:1, hue:345, sat:70, shape:"petal",    regen:0.9 },
   hive:   { at:49, r:28, hp:5.0,  sp:0.45, dmg:2, hue:285, sat:74, shape:"oct",     spawns:{t:"split",cd:5.0,max:4} },
-  vortx:  { at:50, r:19, hp:2.2,  sp:0.70, dmg:1, hue:58,  sat:88, shape:"circle",  pull:{r:280,f:130} },
-  razor:  { at:52, r:11, hp:0.6,  sp:1.70, dmg:1, hue:30,  sat:95, shape:"star",    jump:1 },
+  vortx:  { at:50, r:19, hp:2.2,  sp:0.70, dmg:1, hue:58,  sat:88, shape:"crescent",  pull:{r:280,f:130} },
+  razor:  { at:52, r:11, hp:0.6,  sp:1.70, dmg:1, hue:30,  sat:95, shape:"spike",    jump:1 },
   bulwk:  { at:55, r:30, hp:8.0,  sp:0.36, dmg:3, hue:358, sat:55, shape:"square",  shield:0.5 },
   caster: { at:58, r:17, hp:1.5,  sp:0.55, dmg:1, hue:270, sat:82, shape:"pent",    hold:290, shoot:{cd:2.6,n:3,sp:200,dmg:2,spread:0.26} },
-  wraith: { at:61, r:16, hp:1.4,  sp:0.95, dmg:1, hue:290, sat:70, shape:"circle",  phase:{on:1.4,off:2.2} },
+  wraith: { at:61, r:16, hp:1.4,  sp:0.95, dmg:1, hue:290, sat:70, shape:"eye",  phase:{on:1.4,off:2.2} },
   mortar: { at:64, r:19, hp:2.0,  sp:0.45, dmg:1, hue:12,  sat:86, shape:"hex",     hold:300, lays:{cd:3.4} },
-  coil:   { at:67, r:21, hp:2.6,  sp:0.62, dmg:1, hue:62,  sat:84, shape:"ring",    pull:{r:240,f:105}, shoot:{cd:3.0,n:1,sp:190,dmg:2} },
+  coil:   { at:67, r:21, hp:2.6,  sp:0.62, dmg:1, hue:62,  sat:84, shape:"gear",    pull:{r:240,f:105}, shoot:{cd:3.0,n:1,sp:190,dmg:2} },
   titan:  { at:70, r:58, hp:14,   sp:0.26, dmg:4, hue:350, sat:50, shape:"circle",  boss:1, spawns:{t:"husk",cd:4.5,max:12} },
-  needle: { at:73, r:10, hp:0.5,  sp:1.90, dmg:1, hue:38,  sat:96, shape:"arrow",   charge:{cd:1.6,t:0.35,mul:5.6} },
-  bulb:   { at:76, r:26, hp:3.0,  sp:0.48, dmg:1, hue:322, sat:76, shape:"circle",  explode:{r:200,dmg:4} },
+  needle: { at:73, r:10, hp:0.5,  sp:1.90, dmg:1, hue:38,  sat:96, shape:"bar",   charge:{cd:1.6,t:0.35,mul:5.6} },
+  bulb:   { at:76, r:26, hp:3.0,  sp:0.48, dmg:1, hue:322, sat:76, shape:"drop",  explode:{r:200,dmg:4} },
   clust:  { at:79, r:20, hp:2.2,  sp:0.80, dmg:1, hue:282, sat:82, shape:"lobes",   splits:{t:"shard",n:3} },
-  sentry: { at:82, r:18, hp:2.8,  sp:0.30, dmg:1, hue:258, sat:80, shape:"square",  shoot:{cd:2.8,n:8,sp:180,dmg:2,ring:1} },
+  sentry: { at:82, r:18, hp:2.8,  sp:0.30, dmg:1, hue:258, sat:80, shape:"diamond",  shoot:{cd:2.8,n:8,sp:180,dmg:2,ring:1} },
   reaper: { at:85, r:15, hp:1.4,  sp:1.25, dmg:2, hue:5,   sat:92, shape:"star",    charge:{cd:2.4,t:0.5,mul:5.0}, explode:{r:130,dmg:3} },
-  maw:    { at:88, r:26, hp:5.0,  sp:0.55, dmg:2, hue:340, sat:72, shape:"oct",     pull:{r:300,f:120} },
-  spectr: { at:91, r:17, hp:1.6,  sp:1.05, dmg:1, hue:275, sat:76, shape:"circle",  phase:{on:1.2,off:1.8}, blink:{cd:3.6,d:210} },
+  maw:    { at:88, r:26, hp:5.0,  sp:0.55, dmg:2, hue:340, sat:72, shape:"trefoil",     pull:{r:300,f:120} },
+  spectr: { at:91, r:17, hp:1.6,  sp:1.05, dmg:1, hue:275, sat:76, shape:"crescent",  phase:{on:1.2,off:1.8}, blink:{cd:3.6,d:210} },
   levia:  { at:94, r:64, hp:18,   sp:0.24, dmg:4, hue:0,   sat:54, shape:"circle",  boss:1, spawns:{t:"split",cd:4.0,max:14}, shoot:{cd:3.6,n:8,sp:170,dmg:3,ring:1} },
   shrike: { at:97, r:16, hp:1.1,  sp:0.75, dmg:2, hue:28,  sat:93, shape:"arrow",   charge:{cd:2.0,t:0.5,mul:4.8}, shoot:{cd:3.0,n:1,sp:240,dmg:2} },
   omega:  { at:100,r:76, hp:26,   sp:0.22, dmg:5, hue:352, sat:60, shape:"circle",  boss:1, shield:0.7, regen:1.4,

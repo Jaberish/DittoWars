@@ -7,13 +7,14 @@ import { DASH_CD, INTRO_HOLD, INTRO_LIFT, type Boon } from "./engine/constants";
 import { audio } from "./engine/audio";
 import { install as installDevtools } from "./devtools";
 import { countRun, loadRuns, nextIsFlipped } from "./orientation";
+import { loadBest, submit as submitScore } from "./highscore";
 import { Game } from "./engine/world";
 import type { Phase } from "./engine/types";
 import { Renderer, layoutFor } from "./render/draw";
 import { AbilityPad, Joystick, STICK_R, type Stick } from "./ui/Controls";
 import { Hud, type HudValues } from "./ui/Hud";
 import { LevelBackdrop } from "./ui/LevelBackdrop";
-import { EndScreen, FinishScreen, MenuScreen } from "./ui/Overlay";
+import { EndScreen, FinishScreen, MenuScreen, PauseScreen } from "./ui/Overlay";
 import { T, fill } from "./ui/theme";
 
 const STEP = 1 / 60;
@@ -23,7 +24,6 @@ export function GameScreen() {
   const [phase, setPhase] = useState<Phase>("menu");
   const [popped, setPopped] = useState(0);
   const [muted, setMuted] = useState(false);
-  const [pipHues, setPipHues] = useState<number[]>([]);
   const [intro, setIntro] = useState(0);
 
   // The Picture node wants a picture, never null, so both start empty.
@@ -34,7 +34,6 @@ export function GameScreen() {
 
   const hud: HudValues = {
     hp: useSharedValue(1),
-    pips: useSharedValue(0),
     cdDash: useSharedValue(0),
     cdPop: useSharedValue(0),
   };
@@ -78,6 +77,26 @@ export function GameScreen() {
     });
   }, [game, keys, stick]);
 
+  /**
+   * One door in and out of a pause, for the arena's menu button and for Escape.
+   *
+   * Declared above the key handler because that handler closes over it, and lists it
+   * as a dependency, which is read while this component renders.
+   */
+  const togglePause = useCallback(() => {
+    if (game.phase === "paused") {
+      // A pause can be entered with a finger still down, and the round would
+      // otherwise resume with the player already walking.
+      stick.x.value = 0;
+      stick.y.value = 0;
+      stick.on.value = 0;
+      game.resume();
+      audio.play("ui");
+    } else if (game.pause()) {
+      audio.play("ui");
+    }
+  }, [game, stick]);
+
   // A keyboard makes the web build playable and makes testing on a laptop bearable.
   useEffect(() => {
     if (Platform.OS !== "web" || typeof window === "undefined") return;
@@ -87,6 +106,7 @@ export function GameScreen() {
       if (k === " " || k.startsWith("arrow")) e.preventDefault();
       if (k === " ") game.doDash();
       if (k === "e") game.doPop();
+      if (k === "escape") togglePause();
     };
     const up = (e: KeyboardEvent) => { keys[e.key.toLowerCase()] = false; };
     window.addEventListener("keydown", down);
@@ -95,7 +115,7 @@ export function GameScreen() {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, [game, keys]);
+  }, [game, keys, togglePause]);
 
   const pan = useMemo(
     () =>
@@ -130,8 +150,16 @@ export function GameScreen() {
   useEffect(() => {
     audio.init();
     loadRuns();
+    loadBest();
     return () => audio.dispose();
   }, []);
+
+  // Banked at every level end rather than only at the end of a run, so a run that is
+  // walked away from still counts for what it actually cleared.
+  useEffect(() => {
+    if (phase === "end" || phase === "finish")
+      submitScore(game.run.popped, game.run.round);
+  }, [phase, game]);
 
   useEffect(() => {
     let raf = 0, last = 0, acc = 0, hudAcc = 0;
@@ -144,6 +172,9 @@ export function GameScreen() {
 
       const R = game.R;
       if (!R) return;
+      // A pause parks a near-opaque sheet over the board: the last pictures set are
+      // still the right ones, so re-drawing them every frame is heat for nobody.
+      if (game.phase === "paused") return;
 
       if (game.phase === "playing" || game.phase === "intro") {
         acc += dt;
@@ -169,11 +200,6 @@ export function GameScreen() {
       hud.hp.value = Math.max(0, p.hp / p.max);
       hud.cdDash.value = p.dashCd / DASH_CD;
       hud.cdPop.value = p.novaCd / p.st.novaCd;
-      let mask = 0;
-      for (let i = 1; i < R.units.length && i <= 32; i++)
-        if (R.units[i].alive) mask |= 1 << (i - 1);
-      hud.pips.value = mask;
-
       // The counter is text, so it rides React rather than the UI thread. Eight
       // updates a second reads as live and costs nothing.
       hudAcc += dt;
@@ -206,7 +232,6 @@ export function GameScreen() {
     stick.x.value = 0;
     stick.y.value = 0;
     stick.on.value = 0;
-    setPipHues(game.R!.units.slice(1).map((u) => u.hue));
     setIntro((n) => n + 1);
   }, [game, stick]);
 
@@ -229,6 +254,12 @@ export function GameScreen() {
     start();
   }, [game, start]);
 
+  const toggleMute = useCallback(() => {
+    audio.muted = !audio.muted;
+    setMuted(audio.muted);
+    if (!audio.muted) audio.play("ui");
+  }, []);
+
   const newRun = useCallback(() => {
     audio.play("ui");
     game.newRun();
@@ -237,6 +268,14 @@ export function GameScreen() {
 
   const boss = game.isBoss();
   const final = game.isFinal();
+  const live = phase === "intro" || phase === "playing";
+  // A pause keeps the round mounted behind its sheet, so nothing has to be rebuilt —
+  // and the level's own arrival animation does not replay on the way back in.
+  const inRound = live || phase === "paused";
+  // A screen that reports on a round needs a round to report on. Phase is React
+  // state and the round is not, so they can be a beat apart — on a hot reload, or
+  // any time the two are set from different places.
+  const R = game.R;
 
   return (
     <View style={{ flex: 1, backgroundColor: T.void }}>
@@ -245,7 +284,7 @@ export function GameScreen() {
           <Canvas style={fill}>
             <Picture picture={floorPic} />
           </Canvas>
-          {intro > 0 && (phase === "intro" || phase === "playing") && (
+          {intro > 0 && inRound && (
             <LevelBackdrop
               key={intro}
               round={game.run.round}
@@ -261,24 +300,11 @@ export function GameScreen() {
         </Animated.View>
       </GestureDetector>
 
-      {(phase === "intro" || phase === "playing") && (
+      {inRound && <Hud v={hud} score={popped} lives={game.run.lives} onMenu={togglePause} />}
+
+      {live && (
         <>
           <Joystick s={stick} />
-          <Hud
-            v={hud}
-            round={game.run.round}
-            kind={final ? "Final" : boss ? "Deathmatch" : "Level"}
-            boss={boss}
-            popped={popped}
-            lives={game.run.lives}
-            pipHues={pipHues}
-            muted={muted}
-            onMute={() => {
-              audio.muted = !audio.muted;
-              setMuted(audio.muted);
-              if (!audio.muted) audio.play("ui");
-            }}
-          />
           <AbilityPad
             cdDash={hud.cdDash}
             cdPop={hud.cdPop}
@@ -288,15 +314,26 @@ export function GameScreen() {
         </>
       )}
 
+      {phase === "paused" && (
+        <PauseScreen
+          round={game.run.round}
+          score={popped}
+          muted={muted}
+          onMute={toggleMute}
+          onResume={togglePause}
+          onQuit={newRun}
+        />
+      )}
+
       {phase === "menu" && <MenuScreen onStart={beginRun} />}
 
-      {phase === "end" && (
+      {phase === "end" && R && (
         <EndScreen
           round={game.run.round}
-          reason={game.R!.reason}
+          reason={R.reason}
           ghost={game.pendingGhost}
           ghosts={game.run.ghosts}
-          popped={game.R!.popped}
+          popped={R.popped}
           lives={game.run.lives}
           canRetry={game.canRetry()}
           boss={boss}
@@ -316,13 +353,13 @@ export function GameScreen() {
         />
       )}
 
-      {phase === "finish" && (
+      {phase === "finish" && R && (
         <FinishScreen
           round={game.run.round}
-          won={game.R!.reason === "cleared"}
+          won={R.reason === "cleared"}
           ghosts={game.run.ghosts}
           popped={game.run.popped}
-          standing={game.R!.enemies.length}
+          standing={R.enemies.length}
           onAgain={newRun}
         />
       )}

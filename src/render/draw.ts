@@ -300,8 +300,8 @@ export class Renderer {
   private pickups(canvas: SkCanvas, R: RoundState) {
     const p = this.p;
     for (const pk of R.pickups) {
-      const heal = pk.kind === "heal";
-      const tint = heal ? C.leaf : C.film;
+      const heal = pk.kind === "heal", spare = pk.kind === "life";
+      const tint = heal ? C.leaf : spare ? C.rose : C.film;
       const fade = pk.t < 1.6 ? pk.t / 1.6 : 1;
       const pulse = 0.5 + 0.5 * Math.sin(R.t * 3.4);
       const r = pk.r;
@@ -314,9 +314,18 @@ export class Renderer {
 
       // a cross for health, a chevron for a shield: two marks, no legend needed
       const q = p.s(col(tint, 0.95 * fade), r * 0.14);
-      if (heal) {
-        canvas.drawLine(pk.x - r * 0.3, pk.y, pk.x + r * 0.3, pk.y, q);
-        canvas.drawLine(pk.x, pk.y - r * 0.3, pk.x, pk.y + r * 0.3, q);
+      if (heal || spare) {
+        // a heart, drawn from two lobes and a point
+        const path = p.path2;
+        const w = r * (spare ? 0.34 : 0.4), h = r * (spare ? 0.3 : 0.36);
+        path.reset();
+        path.moveTo(pk.x, pk.y + h * 1.15);
+        path.cubicTo(pk.x - w * 1.9, pk.y + h * 0.1, pk.x - w * 0.75, pk.y - h * 1.35, pk.x, pk.y - h * 0.3);
+        path.cubicTo(pk.x + w * 0.75, pk.y - h * 1.35, pk.x + w * 1.9, pk.y + h * 0.1, pk.x, pk.y + h * 1.15);
+        path.close();
+        canvas.drawPath(path, p.f(col(tint, 0.95 * fade)));
+        // a spare life gets a ring around the heart, so it never reads as a top-up
+        if (spare) canvas.drawCircle(pk.x, pk.y, r * 0.42, p.s(col(tint, 0.9 * fade), r * 0.07));
       } else {
         const path = p.path2;
         path.reset();
@@ -441,6 +450,70 @@ export class Renderer {
         const X = e.x + Math.cos(a) * rr, Y = e.y + Math.sin(a) * rr;
         if (q) path.lineTo(X, Y); else path.moveTo(X, Y);
       }
+      path.close();
+    } else if (shape === "trefoil") {
+      for (let q = 0; q < 3; q++) {
+        const a = -1.5708 + (q * TAU) / 3;
+        path.addCircle(e.x + Math.cos(a) * r * 0.44, e.y + Math.sin(a) * r * 0.44, r * 0.62);
+      }
+    } else if (shape === "petal") {
+      // five rounded lobes: growth, for the one thing on the board that heals itself
+      // — and nothing like the cross on a health pickup
+      for (let q = 0; q < 5; q++) {
+        const a = -1.5708 + (q * TAU) / 5;
+        path.addCircle(e.x + Math.cos(a) * r * 0.62, e.y + Math.sin(a) * r * 0.62, r * 0.5);
+      }
+      path.addCircle(e.x, e.y, r * 0.44);
+    } else if (shape === "crescent") {
+      path.setFillType(FillType.EvenOdd);
+      path.addCircle(e.x, e.y, r);
+      path.addCircle(e.x + r * 0.52, e.y - r * 0.26, r * 0.82);
+    } else if (shape === "spike") {
+      for (let q = 0; q < 24; q++) {
+        const a = -1.5708 + (q * TAU) / 24;
+        const rr = q % 2 ? r * 0.74 : r * 1.18;
+        const X = e.x + Math.cos(a) * rr, Y = e.y + Math.sin(a) * rr;
+        if (q) path.lineTo(X, Y); else path.moveTo(X, Y);
+      }
+      path.close();
+    } else if (shape === "gear") {
+      path.setFillType(FillType.EvenOdd);
+      const teeth = 8;
+      for (let q = 0; q < teeth * 4; q++) {
+        const a = (q * TAU) / (teeth * 4);
+        const rr = q % 4 === 1 || q % 4 === 2 ? r * 1.12 : r * 0.82;
+        const X = e.x + Math.cos(a) * rr, Y = e.y + Math.sin(a) * rr;
+        if (q) path.lineTo(X, Y); else path.moveTo(X, Y);
+      }
+      path.close();
+      path.addCircle(e.x, e.y, r * 0.38);
+    } else if (shape === "eye") {
+      // a lens: two arcs meeting at points, turned to face what it is tracking
+      const a = e.aim || 0, ca = Math.cos(a), sa = Math.sin(a);
+      const px = (u: number, v: number) => [e.x + ca * u - sa * v, e.y + sa * u + ca * v];
+      const [x0, y0] = px(-r * 1.25, 0), [x1, y1] = px(r * 1.25, 0);
+      const [c0, d0] = px(0, -r * 1.5), [c1, d1] = px(0, r * 1.5);
+      path.moveTo(x0, y0);
+      path.quadTo(c0, d0, x1, y1);
+      path.quadTo(c1, d1, x0, y0);
+      path.close();
+    } else if (shape === "bar") {
+      const a = e.aim || 0, ca = Math.cos(a), sa = Math.sin(a);
+      const half = r * 1.8, wide = r * 0.42;
+      const px = (u: number, v: number) => [e.x + ca * u - sa * v, e.y + sa * u + ca * v];
+      const [x0, y0] = px(-half, -wide), [x1, y1] = px(half, -wide);
+      const [x2, y2] = px(half, wide), [x3, y3] = px(-half, wide);
+      path.moveTo(x0, y0); path.lineTo(x1, y1);
+      path.lineTo(x2, y2); path.lineTo(x3, y3);
+      path.close();
+    } else if (shape === "drop") {
+      // a bulb with a point, hanging away from whatever it is drifting toward
+      const a = (e.aim || 0) + Math.PI, ca = Math.cos(a), sa = Math.sin(a);
+      const px = (u: number, v: number) => [e.x + ca * u - sa * v, e.y + sa * u + ca * v];
+      const [tx, ty] = px(r * 1.7, 0);
+      const [l0, m0] = px(0, -r * 0.95), [l1, m1] = px(0, r * 0.95);
+      path.addCircle(e.x, e.y, r * 0.95);
+      path.moveTo(l0, m0); path.lineTo(tx, ty); path.lineTo(l1, m1);
       path.close();
     } else if (POLY[shape]) {
       const n = POLY[shape];
@@ -743,12 +816,14 @@ export class Renderer {
    */
   private bubble(
     canvas: SkCanvas, x: number, y: number, r: number,
-    hue: number, alpha: number, vx = 0, vy = 0,
+    hue: number, alpha: number, vx = 0, vy = 0, scale = 1,
   ) {
     const p = this.p;
-    // squash along the direction of travel — a few percent, felt more than seen
-    const sp = Math.hypot(vx, vy);
-    const st = Math.min(0.16, sp / 4200);
+    // Squash along the direction of travel — a few percent, felt more than seen.
+    // Measured against the unit's own scale: in raw units this saturated the moment
+    // the arena grew, and turned the player into a permanent oval.
+    const sp = Math.hypot(vx, vy) / scale;
+    const st = Math.min(0.1, sp / 4200);
     canvas.save();
     if (st > 0.004) {
       const deg = (Math.atan2(vy, vx) * 180) / Math.PI;
@@ -806,7 +881,7 @@ export class Renderer {
         canvas.drawCircle(u.x, u.y, u.r + 9 * u.st.scale,
           p.s(col(bk === "triple" ? "#FFE9B4" : "#9BFFF1", 0.6 * u.fade), 2 * u.st.scale));
       const rr = u.r * (arr < 1 ? 0.4 + arr * 0.72 : 1);
-      this.bubble(canvas, u.x, u.y, rr, u.hue, al, u.vx, u.vy);
+      this.bubble(canvas, u.x, u.y, rr, u.hue, al, u.vx, u.vy, u.st.scale);
       if (u.alive && arr >= 1) this.hpArc(canvas, u, u.fade);
     }
   }
@@ -858,7 +933,7 @@ export class Renderer {
       canvas.drawCircle(u.x, u.y, u.r * 1.7, q);
     }
     this.gun(canvas, u, 1);
-    this.bubble(canvas, u.x, u.y, u.r, 185, 1, u.vx, u.vy);
+    this.bubble(canvas, u.x, u.y, u.r, 185, 1, u.vx, u.vy, sc);
     this.hpArc(canvas, u, 1);
   }
 

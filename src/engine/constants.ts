@@ -80,7 +80,19 @@ export const DASH_INV = 0.5;
 export const FORM_COST = 5;
 
 /** Deathmatch bosses, against a team that outguns anything its own size. */
-export const BOSS_HP = 2;
+export const BOSS_HP = 8;
+
+/**
+ * From here on, enemies are toughened to keep pace with the team.
+ *
+ * A squad's output grows about twenty-four times between level twenty and level one
+ * hundred while the wave curve alone grows seven, so without this the back half of
+ * the run gets steadily easier — measured at 0.29x the time-to-kill by level 100. The
+ * slope holds the ratio at its level-thirty value, which is the last point the curve
+ * felt right, and does nothing at all before then.
+ */
+export const HARD_FROM = 30;
+export const HARD_SLOPE = 0.0204;
 
 /**
  * A shove is a velocity, not a teleport. `KNOCK_DECAY` bleeds it off, and the launch
@@ -105,6 +117,8 @@ export const PICK_LIFE = 9;
 export const PICK_INSET = 0.075;
 export const PICK_R = 26;
 export const HEAL_FRAC = 0.45;
+/** A spare life on the floor, once every thirty levels. */
+export const LIFE_EVERY = 30;
 export const SHIELD_TIME = 6;
 export const PICK_SEED = 33179;
 
@@ -179,23 +193,32 @@ export interface Boon {
   hue: number;
   /** what it gives */
   desc: string;
-  /** what it takes */
-  cost: string;
 }
 
 export type BoonId = "rapid" | "punch" | "vigor" | "reach" | "surge";
 
 /**
  * Every boon gives and takes, so a Rapid ditto and a Punch ditto are different
- * objects rather than two points on one curve.
+ * objects rather than two points on one curve. What each one takes is not written
+ * here: `Game.boonCost` reads it off the stats, so the card cannot drift from the
+ * trade the game makes.
  */
 export const BOONS: Boon[] = [
-  { id: "rapid", name: "Rapid", hue: 45, desc: "Fire rate", cost: "damage" },
-  { id: "punch", name: "Punch", hue: 12, desc: "Damage", cost: "fire rate" },
-  { id: "vigor", name: "Vigor", hue: 150, desc: "Health", cost: "fire rate" },
-  { id: "reach", name: "Reach", hue: 200, desc: "Range and pierce", cost: "damage" },
-  { id: "surge", name: "Surge", hue: 285, desc: "Pop", cost: "fire rate" },
+  { id: "rapid", name: "Rapid", hue: 45, desc: "Shoot faster" },
+  { id: "punch", name: "Punch", hue: 12, desc: "Shoot harder" },
+  { id: "vigor", name: "Vigor", hue: 150, desc: "More health" },
+  { id: "reach", name: "Reach", hue: 200, desc: "Shoot further" },
+  { id: "surge", name: "Surge", hue: 285, desc: "Stronger Pop" },
 ];
+
+/**
+ * How far ahead one boon may get from your weakest.
+ *
+ * Without a limit the whole run is "take damage again", which is not a choice — and
+ * the stacks saturate anyway, so it was not even a good one. Three is enough room to
+ * favour a direction and not enough to ignore the rest.
+ */
+export const BOON_LEAD = 3;
 
 /**
  * Stacks saturate rather than compound. A first pick is worth about three times what

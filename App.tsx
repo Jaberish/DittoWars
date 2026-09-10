@@ -46,7 +46,9 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.void },
+  // A game is not a document: dragging across it should never leave a blue smear of
+  // selected text. Inherited, so every screen gets it without remembering to.
+  root: { flex: 1, backgroundColor: T.void, userSelect: "none" },
   loading: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: T.void },
   loadingText: { color: T.mute, fontSize: 15, letterSpacing: 2, textTransform: "uppercase" },
 });
